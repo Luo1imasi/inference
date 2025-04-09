@@ -1,0 +1,54 @@
+cmake_minimum_required(VERSION 3.8)
+project(inference)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_BUILD_TYPE Release)
+
+add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(Boost COMPONENTS system)
+
+set(ONNXRUNTIME_ROOT_DIR ${CMAKE_SOURCE_DIR}/thirdparty/onnxruntime-linux-x64-1.21.0)
+set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT_DIR}/include)
+set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT_DIR}/lib)
+
+set(PUBLIC_DEPENDENCIES
+    ${Boost_LIBRARIES} pthread)
+
+add_executable(${PROJECT_NAME}_node src/inference_node.cpp)
+target_include_directories(${PROJECT_NAME}_node
+  PUBLIC 
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+  $<INSTALL_INTERFACE:include>
+  ${ONNXRUNTIME_INCLUDE_DIR}
+)
+target_link_libraries(${PROJECT_NAME}_node PUBLIC ${PUBLIC_DEPENDENCIES} ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so)
+ament_target_dependencies(${PROJECT_NAME}_node PUBLIC rclcpp sensor_msgs)
+set_target_properties(${PROJECT_NAME}_node PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib" 
+)
+
+install(TARGETS ${PROJECT_NAME}_node
+  RUNTIME DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch 
+  DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/config
+)
+install(FILES ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so.1 ${ONNXRUNTIME_LIB_DIR}/libonnxruntime.so.1.21.0
+        DESTINATION lib)
+
+ament_export_dependencies(rclcpp sensor_msgs)
+ament_export_libraries(${PROJECT_NAME})
+ament_package()
