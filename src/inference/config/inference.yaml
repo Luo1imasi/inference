@@ -1,6 +1,9 @@
 Inference:
     ros__parameters:
-        model_name: "1.onnx"
+        model_name: "policy_6000.onnx"
+        act_alpha: 0.9
+        gyro_alpha: 0.9
+        angle_alpha: 0.9
         frame_stack: 15
         decimation: 20
         intra_threads: -1
@@ -13,6 +16,8 @@ Inference:
         obs_scales_ang_vel: 1.0
         obs_scales_dof_pos: 1.0
         obs_scales_dof_vel: 0.05
+        obs_scales_angle: 1.0
+        obs_scales_omega: 0.2
         clip_observations: 18.0
         action_scale: 0.3
         clip_actions: 18.0
