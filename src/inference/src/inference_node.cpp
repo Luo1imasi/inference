@@ -46,7 +46,6 @@ class Inference : public rclcpp::Node {
         this->declare_parameter<float>("obs_scales_dof_pos", 1.0);
         this->declare_parameter<float>("obs_scales_dof_vel", 0.05);
         this->declare_parameter<float>("obs_scales_angle", 1.0);
-        this->declare_parameter<float>("obs_scales_omega", 0.1);
         this->declare_parameter<float>("clip_observations", 100.0);
         this->declare_parameter<float>("action_scale", 0.3);
         this->declare_parameter<float>("clip_actions", 18.0);
@@ -74,7 +73,6 @@ class Inference : public rclcpp::Node {
         this->get_parameter("obs_scales_dof_pos", obs_scales_dof_pos_);
         this->get_parameter("obs_scales_dof_vel", obs_scales_dof_vel_);
         this->get_parameter("obs_scales_angle", obs_scales_angle_);
-        this->get_parameter("obs_scales_omega", obs_scales_omega_);
         this->get_parameter("clip_observations", clip_observations_);
         this->get_parameter("action_scale", action_scale_);
         this->get_parameter("clip_actions", clip_actions_);
@@ -104,7 +102,6 @@ class Inference : public rclcpp::Node {
         RCLCPP_INFO(this->get_logger(), "obs_scales_dof_pos: %f", obs_scales_dof_pos_);
         RCLCPP_INFO(this->get_logger(), "obs_scales_dof_vel: %f", obs_scales_dof_vel_);
         RCLCPP_INFO(this->get_logger(), "obs_scales_angle: %f", obs_scales_angle_);
-        RCLCPP_INFO(this->get_logger(), "obs_scales_omega: %f", obs_scales_omega_);
         RCLCPP_INFO(this->get_logger(), "clip_observations: %f", clip_observations_);
         RCLCPP_INFO(this->get_logger(), "action_scale: %f", action_scale_);
         RCLCPP_INFO(this->get_logger(), "clip_actions: %f", clip_actions_);
@@ -180,7 +177,7 @@ class Inference : public rclcpp::Node {
     float dt_;
     float vx_, vy_, dyaw_;
     float cycle_time_, obs_scales_lin_vel_, obs_scales_ang_vel_, obs_scales_dof_pos_, obs_scales_dof_vel_,
-        obs_scales_angle_, obs_scales_omega_, clip_observations_;
+        obs_scales_angle_, clip_observations_;
     float action_scale_, clip_actions_;
     std::vector<float> motor_lower_limit_, motor_higher_limit_;
     std::mutex infer_mutex_;
@@ -290,7 +287,7 @@ class Inference : public rclcpp::Node {
                 obs_[29 + i] = last_act_[i];
             }
             for (int i = 0; i < 3; i++) {
-                obs_[41 + i] = imu_obs_[4 + i] * obs_scales_omega_;
+                obs_[41 + i] = imu_obs_[4 + i] * obs_scales_ang_vel_;
             }
             quaternion_to_euler();
             std::transform(obs_.begin(), obs_.end(), obs_.begin(), [this](float val) {
