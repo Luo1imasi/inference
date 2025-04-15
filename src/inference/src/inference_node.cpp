@@ -180,40 +180,34 @@ class Inference : public rclcpp::Node {
         obs_scales_angle_, clip_observations_;
     float action_scale_, clip_actions_;
     std::vector<float> motor_lower_limit_, motor_higher_limit_;
-    std::mutex infer_mutex_;
+    std::shared_mutex infer_mutex_;
     float last_roll_, last_pitch_, last_yaw_;
 
     void subs_left_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
-        std::unique_lock<std::mutex> lock(infer_mutex_, std::defer_lock);
-        if (lock.try_lock()) {
-            for (int i = 0; i < 6; i++) {
-                left_obs_[i] = msg->position[i];
-                left_obs_[6 + i] = msg->velocity[i];
-            }
+        std::unique_lock lock(infer_mutex_);
+        for (int i = 0; i < 6; i++) {
+            left_obs_[i] = msg->position[i];
+            left_obs_[6 + i] = msg->velocity[i];
         }
     }
 
     void subs_right_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
-        std::unique_lock<std::mutex> lock(infer_mutex_, std::defer_lock);
-        if (lock.try_lock()) {
-            for (int i = 0; i < 6; i++) {
-                right_obs_[i] = msg->position[i];
-                right_obs_[6 + i] = msg->velocity[i];
-            }
+        std::unique_lock lock(infer_mutex_);
+        for (int i = 0; i < 6; i++) {
+            right_obs_[i] = msg->position[i];
+            right_obs_[6 + i] = msg->velocity[i];
         }
     }
 
     void subs_IMU_callback(const std::shared_ptr<sensor_msgs::msg::Imu> msg) {
-        std::unique_lock<std::mutex> lock(infer_mutex_, std::defer_lock);
-        if (lock.try_lock()) {
-            imu_obs_[0] = msg->orientation.w;
-            imu_obs_[1] = msg->orientation.x;
-            imu_obs_[2] = msg->orientation.y;
-            imu_obs_[3] = msg->orientation.z;
-            imu_obs_[4] = gyro_alpha_ * msg->angular_velocity.x + (1 - gyro_alpha_) * imu_obs_[4];
-            imu_obs_[5] = gyro_alpha_ * msg->angular_velocity.y + (1 - gyro_alpha_) * imu_obs_[5];
-            imu_obs_[6] = gyro_alpha_ * msg->angular_velocity.z + (1 - gyro_alpha_) * imu_obs_[6];
-        }
+        std::unique_lock lock(infer_mutex_);
+        imu_obs_[0] = msg->orientation.w;
+        imu_obs_[1] = msg->orientation.x;
+        imu_obs_[2] = msg->orientation.y;
+        imu_obs_[3] = msg->orientation.z;
+        imu_obs_[4] = gyro_alpha_ * msg->angular_velocity.x + (1 - gyro_alpha_) * imu_obs_[4];
+        imu_obs_[5] = gyro_alpha_ * msg->angular_velocity.y + (1 - gyro_alpha_) * imu_obs_[5];
+        imu_obs_[6] = gyro_alpha_ * msg->angular_velocity.z + (1 - gyro_alpha_) * imu_obs_[6];
     }
 
     void publish_joint_states() {
@@ -271,7 +265,7 @@ class Inference : public rclcpp::Node {
 
     void inference() {
         {
-            std::unique_lock<std::mutex> lock(infer_mutex_);
+            std::shared_lock lock(infer_mutex_);
             obs_[0] = cos(2.0f * PI * count_lowlevel_ * decimation_ * dt_ / cycle_time_);
             obs_[1] = sin(2.0f * PI * count_lowlevel_ * decimation_ * dt_ / cycle_time_);
             obs_[2] = vx_ * obs_scales_lin_vel_;
