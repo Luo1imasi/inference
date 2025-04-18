@@ -11,8 +11,6 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <vector>
 
-#define PI 3.1415926
-
 class Inference : public rclcpp::Node {
    public:
     Inference() : Node("inference_node") {
@@ -27,7 +25,7 @@ class Inference : public rclcpp::Node {
         right_act_.resize(12);
         motor_lower_limit_.resize(12);
         motor_higher_limit_.resize(12);
-        count_lowlevel_ = 1;
+        count_lowlevel_ = 0;
 
         this->declare_parameter<std::string>("model_name", "1.onnx");
         this->declare_parameter<float>("act_alpha", 0.9);
@@ -40,6 +38,8 @@ class Inference : public rclcpp::Node {
         this->declare_parameter<float>("vx", 0.0);
         this->declare_parameter<float>("vy", 0.0);
         this->declare_parameter<float>("dyaw", 0.0);
+        this->declare_parameter<bool>("heading_command", false);
+        this->declare_parameter<float>("heading", 0.0);
         this->declare_parameter<float>("cycle_time", 0.7);
         this->declare_parameter<float>("obs_scales_lin_vel", 2.0);
         this->declare_parameter<float>("obs_scales_ang_vel", 1.0);
@@ -67,6 +67,8 @@ class Inference : public rclcpp::Node {
         this->get_parameter("vx", vx_);
         this->get_parameter("vy", vy_);
         this->get_parameter("dyaw", dyaw_);
+        this->get_parameter("heading_command", heading_command_);
+        this->get_parameter("heading", heading_);
         this->get_parameter("cycle_time", cycle_time_);
         this->get_parameter("obs_scales_lin_vel", obs_scales_lin_vel_);
         this->get_parameter("obs_scales_ang_vel", obs_scales_ang_vel_);
@@ -96,6 +98,8 @@ class Inference : public rclcpp::Node {
         RCLCPP_INFO(this->get_logger(), "vx: %f", vx_);
         RCLCPP_INFO(this->get_logger(), "vy: %f", vy_);
         RCLCPP_INFO(this->get_logger(), "dyaw: %f", dyaw_);
+        RCLCPP_INFO(this->get_logger(), "heading_command: %d", heading_command_);
+        RCLCPP_INFO(this->get_logger(), "heading: %f", heading_);
         RCLCPP_INFO(this->get_logger(), "cycle_time: %f", cycle_time_);
         RCLCPP_INFO(this->get_logger(), "obs_scales_lin_vel: %f", obs_scales_lin_vel_);
         RCLCPP_INFO(this->get_logger(), "obs_scales_ang_vel: %f", obs_scales_ang_vel_);
@@ -149,8 +153,8 @@ class Inference : public rclcpp::Node {
             "/IMU_data", 1, std::bind(&Inference::subs_IMU_callback, this, std::placeholders::_1));
         left_publisher_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_left", 1);
         right_publisher_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_right", 1);
-        timer_ = this->create_wall_timer(std::chrono::milliseconds((int)(dt_ * 1000 * decimation_)),
-                                         std::bind(&Inference::inference, this));
+        timer_ =
+            this->create_wall_timer(std::chrono::milliseconds(1), std::bind(&Inference::inference, this));
     }
     ~Inference() {}
 
@@ -175,13 +179,14 @@ class Inference : public rclcpp::Node {
     std::deque<std::vector<float>> hist_obs_;
     std::vector<float> left_obs_, right_obs_, imu_obs_, left_act_, right_act_;
     float dt_;
-    float vx_, vy_, dyaw_;
+    float vx_, vy_, dyaw_, heading_;
     float cycle_time_, obs_scales_lin_vel_, obs_scales_ang_vel_, obs_scales_dof_pos_, obs_scales_dof_vel_,
         obs_scales_angle_, clip_observations_;
     float action_scale_, clip_actions_;
     std::vector<float> motor_lower_limit_, motor_higher_limit_;
     std::shared_mutex infer_mutex_;
     float last_roll_, last_pitch_, last_yaw_;
+    bool heading_command_;
 
     void subs_left_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
         std::unique_lock lock(infer_mutex_);
@@ -243,53 +248,72 @@ class Inference : public rclcpp::Node {
         float t1 = 1.0f - 2.0f * (x * x + y * y);
         float roll = std::atan2(t0, t1);  // ROLL
         roll = angle_alpha_ * roll + (1 - angle_alpha_) * last_roll_;
-        obs_[44] = roll * obs_scales_angle_;
+        roll = roll * obs_scales_angle_;
+        obs_[44] = roll;
         last_roll_ = roll;
 
         float t2 = 2.0 * (w * y - z * x);
         t2 = std::max(-1.0f, std::min(1.0f, t2));
         float pitch = std::asin(t2);  // PITCH
+        pitch = pitch * obs_scales_angle_;
         pitch = angle_alpha_ * pitch + (1 - angle_alpha_) * last_pitch_;
-        obs_[45] = pitch * obs_scales_angle_;
+        obs_[45] = pitch;
         last_pitch_ = pitch;
 
         float t3 = 2.0f * (w * z + x * y);
         float t4 = 1.0f - 2.0f * (y * y + z * z);
         float yaw = std::atan2(t3, t4);  // YAW
+        yaw = yaw * obs_scales_angle_;
         yaw = angle_alpha_ * yaw + (1 - angle_alpha_) * last_yaw_;
-        obs_[46] = yaw * obs_scales_angle_;
+        obs_[46] = yaw;
         last_yaw_ = yaw;
 
         // RCLCPP_INFO(this->get_logger(), "Euler angles: %f %f %f", obs_[44], obs_[45], obs_[46]);
     }
 
     void inference() {
-        {
-            std::shared_lock lock(infer_mutex_);
-            obs_[0] = cos(2.0f * PI * count_lowlevel_ * decimation_ * dt_ / cycle_time_);
-            obs_[1] = sin(2.0f * PI * count_lowlevel_ * decimation_ * dt_ / cycle_time_);
-            obs_[2] = vx_ * obs_scales_lin_vel_;
-            obs_[3] = vy_ * obs_scales_lin_vel_;
-            obs_[4] = dyaw_ * obs_scales_ang_vel_;
-            for (int i = 0; i < 6; i++) {
-                obs_[5 + i] = left_obs_[i] * obs_scales_dof_pos_;
-                obs_[17 + i] = left_obs_[6 + i] * obs_scales_dof_vel_;
-                obs_[11 + i] = right_obs_[i] * obs_scales_dof_pos_;
-                obs_[23 + i] = right_obs_[6 + i] * obs_scales_dof_vel_;
+        if (count_lowlevel_ % decimation_ == 0) {
+            {
+                std::shared_lock lock(infer_mutex_);
+                quaternion_to_euler();
+                obs_[0] = cos(2.0f * M_PI * count_lowlevel_ * dt_ / cycle_time_);
+                obs_[1] = sin(2.0f * M_PI * count_lowlevel_ * dt_ / cycle_time_);
+                obs_[2] = vx_ * obs_scales_lin_vel_;
+                obs_[3] = vy_ * obs_scales_lin_vel_;
+                if (heading_command_) {
+                    float angle = heading_ - last_yaw_;
+                    angle = fmod(angle, 2 * M_PI);
+                    // 如果角度大于 π,则减去 2π
+                    if (angle > M_PI) {
+                        angle -= 2 * M_PI;
+                    }
+                    obs_[4] = std::max(-1.0, std::min(0.5 * angle, 1.0)) * obs_scales_ang_vel_;
+                } else {
+                    obs_[4] = dyaw_ * obs_scales_ang_vel_;
+                }
+                if (fabs(obs_[4]) <= 0.2) {
+                    obs_[4] = 0.0;
+                }
+                // RCLCPP_INFO(this->get_logger(), "obs_[4]: %f", obs_[4]);
+
+                for (int i = 0; i < 6; i++) {
+                    obs_[5 + i] = left_obs_[i] * obs_scales_dof_pos_;
+                    obs_[17 + i] = left_obs_[6 + i] * obs_scales_dof_vel_;
+                    obs_[11 + i] = right_obs_[i] * obs_scales_dof_pos_;
+                    obs_[23 + i] = right_obs_[6 + i] * obs_scales_dof_vel_;
+                }
+                for (int i = 0; i < 12; i++) {
+                    obs_[29 + i] = last_act_[i];
+                }
+                for (int i = 0; i < 3; i++) {
+                    obs_[41 + i] = imu_obs_[4 + i] * obs_scales_ang_vel_;
+                }
+                std::transform(obs_.begin(), obs_.end(), obs_.begin(), [this](float val) {
+                    return std::clamp(val, -clip_observations_, clip_observations_);
+                });
+                hist_obs_.pop_front();
+                hist_obs_.push_back(obs_);
             }
-            for (int i = 0; i < 12; i++) {
-                obs_[29 + i] = last_act_[i];
-            }
-            for (int i = 0; i < 3; i++) {
-                obs_[41 + i] = imu_obs_[4 + i] * obs_scales_ang_vel_;
-            }
-            quaternion_to_euler();
-            std::transform(obs_.begin(), obs_.end(), obs_.begin(), [this](float val) {
-                return std::clamp(val, -clip_observations_, clip_observations_);
-            });
-            hist_obs_.pop_front();
-            hist_obs_.push_back(obs_);
-        }
             std::vector<float> input(47 * frame_stack_);
             for (int i = 0; i < frame_stack_; i++) {
                 std::copy(hist_obs_[i].begin(), hist_obs_[i].end(), input.begin() + i * 47);
@@ -299,36 +323,40 @@ class Inference : public rclcpp::Node {
             for (size_t i = 0; i < num_inputs_; i++) {
                 input_names_raw[i] = input_names_[i].c_str();
             }
-        std::vector<const char *> output_names_raw(num_outputs_);
-        for (size_t i = 0; i < num_outputs_; i++) {
-            output_names_raw[i] = output_names_[i].c_str();
-        }
-        Ort::Value input_tensor =
-            Ort::Value::CreateTensor<float>(memory_info, const_cast<float *>(input.data()), input.size(),
-                                            input_shape_.data(), input_shape_.size());
+            std::vector<const char *> output_names_raw(num_outputs_);
+            for (size_t i = 0; i < num_outputs_; i++) {
+                output_names_raw[i] = output_names_[i].c_str();
+            }
+            Ort::Value input_tensor =
+                Ort::Value::CreateTensor<float>(memory_info, const_cast<float *>(input.data()), input.size(),
+                                                input_shape_.data(), input_shape_.size());
 
-        auto output_tensors = session_->Run(Ort::RunOptions{nullptr}, input_names_raw.data(), &input_tensor,
-                                            1, output_names_raw.data(), output_names_raw.size());
+            auto output_tensors =
+                session_->Run(Ort::RunOptions{nullptr}, input_names_raw.data(), &input_tensor, 1,
+                              output_names_raw.data(), output_names_raw.size());
 
-        std::vector<float> output;
-        for (auto &tensor : output_tensors) {
-            float *data = tensor.GetTensorMutableData<float>();
-            size_t count = tensor.GetTensorTypeAndShapeInfo().GetElementCount();
-            output.insert(output.end(), data, data + count);
+            std::vector<float> output;
+            for (auto &tensor : output_tensors) {
+                float *data = tensor.GetTensorMutableData<float>();
+                size_t count = tensor.GetTensorTypeAndShapeInfo().GetElementCount();
+                output.insert(output.end(), data, data + count);
+            }
+            act_.resize(output.size());
+            std::transform(output.begin(), output.end(), act_.begin(),
+                           [this](float val) { return val * action_scale_; });
+            for (size_t i = 0; i < act_.size(); i++) {
+                act_[i] = act_alpha_ * act_[i] + (1 - act_alpha_) * last_act_[i];
+            }
+            std::transform(act_.begin(), act_.end(), act_.begin(),
+                           [this](float val) { return std::clamp(val, -clip_actions_, clip_actions_); });
+            for (int i = 0; i < act_.size(); i++) {
+                act_[i] = std::max(motor_lower_limit_[i], std::min(act_[i], motor_higher_limit_[i]));
+            }
+            last_act_ = act_;
         }
-        act_.resize(output.size());
-        std::transform(output.begin(), output.end(), act_.begin(),
-                       [this](float val) { return val * action_scale_; });
-        for (size_t i = 0; i < act_.size(); i++) {
-            act_[i] = act_alpha_ * act_[i] + (1 - act_alpha_) * last_act_[i];
+        if (count_lowlevel_ % 5 == 0) {
+            publish_joint_states();
         }
-        std::transform(act_.begin(), act_.end(), act_.begin(),
-                       [this](float val) { return std::clamp(val, -clip_actions_, clip_actions_); });
-        for (int i = 0; i < act_.size(); i++) {
-            act_[i] = std::max(motor_lower_limit_[i], std::min(act_[i], motor_higher_limit_[i]));
-        }
-        last_act_ = act_;
-        publish_joint_states();
         count_lowlevel_ += 1;
     }
 };
