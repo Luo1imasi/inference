@@ -1,24 +1,26 @@
 Inference:
     ros__parameters:
-        model_name: "policy_6000.onnx"
-        act_alpha: 0.9
-        gyro_alpha: 0.9
-        angle_alpha: 0.9
+        model_name: "policy_1.onnx"
+        act_alpha: 1.0
+        gyro_alpha: 1.0
+        angle_alpha: 1.0
         frame_stack: 15
-        decimation: 20
+        decimation: 5
         intra_threads: -1
-        dt: 0.001
+        dt: 0.004
         vx: 0.0
         vy: 0.0
         dyaw: 0.0
-        cycle_time: 0.70
+        heading_command: true # if true: compute ang vel command from heading error instad of using dyaw
+        heading: 0.0
+        cycle_time: 0.8
         obs_scales_lin_vel: 2.0
         obs_scales_ang_vel: 1.0
         obs_scales_dof_pos: 1.0
         obs_scales_dof_vel: 0.05
         obs_scales_angle: 1.0
         clip_observations: 18.0
-        action_scale: 0.3
+        action_scale: 1.0
         clip_actions: 18.0
         motor_lower_limit: [-0.15,-1.0,-1.0,-0.4,-1.0,-0.5,-0.7,-1.2,-1.0,-1.5,-1.0,-0.5]
         motor_higher_limit: [0.7, 1.2, 1.0, 1.5, 1.0, 0.5, 0.15, 1.0, 1.0, 0.4, 1.0, 0.5]

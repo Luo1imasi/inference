@@ -153,8 +153,8 @@ class Inference : public rclcpp::Node {
             "/IMU_data", 1, std::bind(&Inference::subs_IMU_callback, this, std::placeholders::_1));
         left_publisher_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_left", 1);
         right_publisher_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_right", 1);
-        timer_ =
-            this->create_wall_timer(std::chrono::milliseconds(1), std::bind(&Inference::inference, this));
+        timer_ = this->create_wall_timer(std::chrono::milliseconds((int)(dt_ * 1000)),
+                                         std::bind(&Inference::inference, this));
     }
     ~Inference() {}
 
@@ -344,19 +344,17 @@ class Inference : public rclcpp::Node {
             act_.resize(output.size());
             std::transform(output.begin(), output.end(), act_.begin(),
                            [this](float val) { return val * action_scale_; });
-            for (size_t i = 0; i < act_.size(); i++) {
-                act_[i] = act_alpha_ * act_[i] + (1 - act_alpha_) * last_act_[i];
-            }
             std::transform(act_.begin(), act_.end(), act_.begin(),
                            [this](float val) { return std::clamp(val, -clip_actions_, clip_actions_); });
             for (int i = 0; i < act_.size(); i++) {
                 act_[i] = std::max(motor_lower_limit_[i], std::min(act_[i], motor_higher_limit_[i]));
             }
-            last_act_ = act_;
         }
-        if (count_lowlevel_ % 5 == 0) {
-            publish_joint_states();
+        for (size_t i = 0; i < act_.size(); i++) {
+            act_[i] = act_alpha_ * act_[i] + (1 - act_alpha_) * last_act_[i];
         }
+        publish_joint_states();
+        last_act_ = act_;
         count_lowlevel_ += 1;
     }
 };
