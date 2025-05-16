@@ -9,6 +9,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
+#include <sensor_msgs/msg/joy.hpp>
 #include <vector>
 
 class Inference : public rclcpp::Node {
@@ -38,8 +39,6 @@ class Inference : public rclcpp::Node {
         this->declare_parameter<float>("vx", 0.0);
         this->declare_parameter<float>("vy", 0.0);
         this->declare_parameter<float>("dyaw", 0.0);
-        this->declare_parameter<bool>("heading_command", false);
-        this->declare_parameter<float>("heading", 0.0);
         this->declare_parameter<float>("cycle_time", 0.7);
         this->declare_parameter<float>("obs_scales_lin_vel", 2.0);
         this->declare_parameter<float>("obs_scales_ang_vel", 1.0);
@@ -67,8 +66,6 @@ class Inference : public rclcpp::Node {
         this->get_parameter("vx", vx_);
         this->get_parameter("vy", vy_);
         this->get_parameter("dyaw", dyaw_);
-        this->get_parameter("heading_command", heading_command_);
-        this->get_parameter("heading", heading_);
         this->get_parameter("cycle_time", cycle_time_);
         this->get_parameter("obs_scales_lin_vel", obs_scales_lin_vel_);
         this->get_parameter("obs_scales_ang_vel", obs_scales_ang_vel_);
@@ -98,8 +95,6 @@ class Inference : public rclcpp::Node {
         RCLCPP_INFO(this->get_logger(), "vx: %f", vx_);
         RCLCPP_INFO(this->get_logger(), "vy: %f", vy_);
         RCLCPP_INFO(this->get_logger(), "dyaw: %f", dyaw_);
-        RCLCPP_INFO(this->get_logger(), "heading_command: %d", heading_command_);
-        RCLCPP_INFO(this->get_logger(), "heading: %f", heading_);
         RCLCPP_INFO(this->get_logger(), "cycle_time: %f", cycle_time_);
         RCLCPP_INFO(this->get_logger(), "obs_scales_lin_vel: %f", obs_scales_lin_vel_);
         RCLCPP_INFO(this->get_logger(), "obs_scales_ang_vel: %f", obs_scales_ang_vel_);
@@ -151,6 +146,8 @@ class Inference : public rclcpp::Node {
             "/joint_states_right", 1, std::bind(&Inference::subs_right_callback, this, std::placeholders::_1));
         IMU_subscription_ = this->create_subscription<sensor_msgs::msg::Imu>(
             "/IMU_data", 1, std::bind(&Inference::subs_IMU_callback, this, std::placeholders::_1));
+        joy_subscription_ = this->create_subscription<sensor_msgs::msg::Joy>(
+            "/joy", 1, std::bind(&Inference::subs_joy_callback, this, std::placeholders::_1));
         left_publisher_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_left", 1);
         right_publisher_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_command_right", 1);
         timer_ = this->create_wall_timer(std::chrono::milliseconds((int)(dt_ * 1000)),
@@ -172,6 +169,7 @@ class Inference : public rclcpp::Node {
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr left_publisher_, right_publisher_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr left_subscription_, right_subscription_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr  IMU_subscription_;
+    rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
     rclcpp::TimerBase::SharedPtr timer_;
     int count_lowlevel_;
     std::vector<float> obs_, act_, last_act_;
@@ -179,15 +177,25 @@ class Inference : public rclcpp::Node {
     std::deque<std::vector<float>> hist_obs_;
     std::vector<float> left_obs_, right_obs_, imu_obs_, left_act_, right_act_;
     float dt_;
-    float vx_, vy_, dyaw_, heading_;
+    float vx_, vy_, dyaw_;
     float cycle_time_, obs_scales_lin_vel_, obs_scales_ang_vel_, obs_scales_dof_pos_, obs_scales_dof_vel_,
         obs_scales_angle_, clip_observations_;
     float action_scale_, clip_actions_;
     std::vector<float> motor_lower_limit_, motor_higher_limit_;
     std::shared_mutex infer_mutex_;
     float last_roll_, last_pitch_, last_yaw_;
-    bool heading_command_;
-
+    void subs_joy_callback(const std::shared_ptr<sensor_msgs::msg::Joy> msg) {
+        std::unique_lock lock(infer_mutex_);
+        vx_ = msg->axes[5] * 0.2;
+        vy_ = msg->axes[4] * 0.2;
+        if (msg->buttons[7] == 1) {
+            dyaw_ = msg->buttons[7] * 0.4;
+        } else if (msg->buttons[8] == 1) {
+            dyaw_ = -msg->buttons[8] * 0.4;
+        } else {
+            dyaw_ = 0.0;
+        }
+    }
     void subs_left_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
         std::unique_lock lock(infer_mutex_);
         for (int i = 0; i < 6; i++) {
@@ -280,20 +288,7 @@ class Inference : public rclcpp::Node {
                 obs_[1] = sin(2.0f * M_PI * count_lowlevel_ * dt_ / cycle_time_);
                 obs_[2] = vx_ * obs_scales_lin_vel_;
                 obs_[3] = vy_ * obs_scales_lin_vel_;
-                if (heading_command_) {
-                    float angle = heading_ - last_yaw_;
-                    angle = fmod(angle, 2 * M_PI);
-                    // 如果角度大于 π,则减去 2π
-                    if (angle > M_PI) {
-                        angle -= 2 * M_PI;
-                    }
-                    obs_[4] = std::max(-1.0, std::min(0.5 * angle, 1.0)) * obs_scales_ang_vel_;
-                } else {
-                    obs_[4] = dyaw_ * obs_scales_ang_vel_;
-                }
-                if (fabs(obs_[4]) <= 0.2) {
-                    obs_[4] = 0.0;
-                }
+                obs_[4] = dyaw_ * obs_scales_ang_vel_;
                 // RCLCPP_INFO(this->get_logger(), "obs_[4]: %f", obs_[4]);
 
                 for (int i = 0; i < 6; i++) {
