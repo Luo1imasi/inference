@@ -4,22 +4,21 @@ Inference:
         act_alpha: 1.0
         gyro_alpha: 1.0
         angle_alpha: 1.0
-        frame_stack: 15
-        decimation: 5
+        frame_stack: 10
+        decimation: 4
         intra_threads: -1
-        dt: 0.004
+        dt: 0.005
         vx: 0.0
         vy: 0.0
         dyaw: 0.0
-        cycle_time: 0.8
-        obs_scales_lin_vel: 2.0
+        obs_scales_lin_vel: 1.0
         obs_scales_ang_vel: 1.0
         obs_scales_dof_pos: 1.0
-        obs_scales_dof_vel: 0.05
-        obs_scales_angle: 1.0
+        obs_scales_dof_vel: 1.0
+        obs_scales_gravity_b: 1.0
         clip_observations: 18.0
-        action_scale: 1.0
+        action_scale: 0.7
         clip_actions: 18.0
-        motor_lower_limit: [-0.15,-1.0,-1.0,-0.6,-1.0,-0.5,-0.7,-1.2,-1.0,-1.5,-1.0,-0.5]
+        motor_lower_limit: [-0.15,-1.0,-1.0,-0.6,-1.0,-0.5,-0.7,-1.2,-1.0,-1.5,-1.0,-0.5] #//TODO need to be set
         motor_higher_limit: [0.7, 1.2, 1.0, 1.5, 1.0, 0.5, 0.15, 1.0, 1.0, 0.6, 1.0, 0.5]
 
