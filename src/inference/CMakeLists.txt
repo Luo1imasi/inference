@@ -1,9 +1,8 @@
 cmake_minimum_required(VERSION 3.8)
 project(inference)
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native")
+set(CMAKE_CXX_COMPILER_LAUNCHER ccache)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -17,6 +16,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(Boost COMPONENTS system)
+find_package(Eigen3 REQUIRED)
 
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
 set(ONNXRUNTIME_ROOT_DIR ${CMAKE_SOURCE_DIR}/thirdparty/onnxruntime-linux-x64-1.21.0)
@@ -28,7 +28,7 @@ set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT_DIR}/include)
 set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT_DIR}/lib)
 
 set(PUBLIC_DEPENDENCIES
-    ${Boost_LIBRARIES} pthread)
+    ${Boost_LIBRARIES} pthread Eigen3::Eigen)
 
 add_executable(${PROJECT_NAME}_node src/inference_node.cpp)
 target_include_directories(${PROJECT_NAME}_node
