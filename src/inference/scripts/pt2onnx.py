@@ -6,8 +6,13 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Convert PyTorch .pt model to ONNX format")
     parser.add_argument("--pt_path", type=str, required=True, help="Path to the input .pt model file")
     parser.add_argument("--onnx_path", type=str, required=True, help="Path to save the output ONNX model")
-    parser.add_argument("--input_shape", type=int, nargs="+", default=[1, 705], 
-                       help="Input shape for the model, e.g., 1 3 224 224 for batch_size, channels, height, width")
+    parser.add_argument(
+        "--input_shape",
+        type=int,
+        nargs="+",
+        default=[1, 780],
+        help="Input shape for the model, e.g., 1 3 224 224 for batch_size, channels, height, width",
+    )
     parser.add_argument("--opset_version", type=int, default=11, 
                        help="ONNX opset version to use")
     return parser.parse_args()
