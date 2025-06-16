@@ -27,6 +27,9 @@ class Inference : public rclcpp::Node {
         imu_obs_[0] = 1.0, imu_obs_[1] = 0.0, imu_obs_[2] = 0.0, imu_obs_[3] = 0.0;
         motor_lower_limit_.resize(23);
         motor_higher_limit_.resize(23);
+        motor_default_angle_.resize(23);
+        usd2urdf_.resize(23);
+        last_output_.resize(23);
         step_ = 0;
 
         this->declare_parameter<std::string>("model_name", "1.onnx");
@@ -50,10 +53,19 @@ class Inference : public rclcpp::Node {
         this->declare_parameter<float>("clip_actions", 18.0);
         this->declare_parameter<std::vector<float>>(
             "motor_lower_limit",
-            std::vector<float>{-0.15, -1.0, -1.0, -0.4, -1.0, -0.5, -0.7, -1.2, -1.0, -1.5, -1.0, -0.5});
+            std::vector<float>{-0.2,  -0.2, -2.5,  0.0,  -0.6,  -0.5,  -1.0, -2.0,  -2.5, 0.0,   -0.6, -0.5,
+                               -2.62, -2.0, -0.25, -2.6, -1.00, -1.57, -2.0, -2.25, -2.6, -1.00, -1.57});
         this->declare_parameter<std::vector<float>>(
             "motor_higher_limit",
-            std::vector<float>{0.7, 1.2, 1.0, 1.5, 1.0, 0.5, 0.15, 1.0, 1.0, 0.4, 1.0, 0.5});
+            std::vector<float>{1.0,  2.0, 0.8,  2.5, 0.6,  0.5,  0.2, 0.2,  0.8, 2.5,  0.6, 0.5,
+                               2.62, 2.0, 2.25, 2.6, 1.57, 1.57, 2.0, 0.25, 2.6, 1.57, 1.57});
+        this->declare_parameter<std::vector<float>>(
+            "motor_default_angle",
+            std::vector<float>{0.0, 0.0, -0.24, 0.48, -0.24, 0.0, 0.0, 0.0, -0.24, 0.48, -0.24, 0.0,
+                               0.0, 0.2, 0.0,   0.0,  1.0,   0.0, 0.2, 0.0, 0.0,   1.0,  0.0});
+        this->declare_parameter<std::vector<float>>(
+            "usd2urdf", std::vector<float>{0, 6,  12, 1, 7,  13, 18, 2, 8,  14, 19, 3,
+                                           9, 15, 20, 4, 10, 16, 21, 5, 11, 17, 22});
 
         this->get_parameter("model_name", model_name_);
         this->get_parameter("act_alpha", act_alpha_);
@@ -81,6 +93,12 @@ class Inference : public rclcpp::Node {
         this->get_parameter("motor_higher_limit", tmp);
         std::transform(tmp.begin(), tmp.end(), motor_higher_limit_.begin(),
                        [](double val) { return static_cast<float>(val); });
+        this->get_parameter("motor_default_angle", tmp);
+        std::transform(tmp.begin(), tmp.end(), motor_default_angle_.begin(),
+                       [](double val) { return static_cast<float>(val); });
+        this->get_parameter("usd2urdf", tmp);
+        std::transform(tmp.begin(), tmp.end(), usd2urdf_.begin(),
+                       [](double val) { return static_cast<float>(val); });
 
         model_path_ = std::string(ROOT_DIR) + "models/" + model_name_;
         RCLCPP_INFO(this->get_logger(), "model_path: %s", model_path_.c_str());
@@ -101,19 +119,48 @@ class Inference : public rclcpp::Node {
         RCLCPP_INFO(this->get_logger(), "obs_scales_gravity_b: %f", obs_scales_gravity_b_);
         RCLCPP_INFO(this->get_logger(), "action_scale: %f", action_scale_);
         RCLCPP_INFO(this->get_logger(), "clip_actions: %f", clip_actions_);
-        RCLCPP_INFO(this->get_logger(), "motor_lower_limit: %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f",
-                    motor_lower_limit_[0], motor_lower_limit_[1], motor_lower_limit_[2],
-                    motor_lower_limit_[3], motor_lower_limit_[4], motor_lower_limit_[5],
-                    motor_lower_limit_[6], motor_lower_limit_[7], motor_lower_limit_[8],
-                    motor_lower_limit_[9], motor_lower_limit_[10], motor_lower_limit_[11]);
-        RCLCPP_INFO(this->get_logger(), "motor_higher_limit: %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f",
+        RCLCPP_INFO(
+            this->get_logger(),
+            "motor_lower_limit: %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, "
+            "%f, %f, %f, %f",
+            motor_lower_limit_[0], motor_lower_limit_[1], motor_lower_limit_[2], motor_lower_limit_[3],
+            motor_lower_limit_[4], motor_lower_limit_[5], motor_lower_limit_[6], motor_lower_limit_[7],
+            motor_lower_limit_[8], motor_lower_limit_[9], motor_lower_limit_[10], motor_lower_limit_[11],
+            motor_lower_limit_[12], motor_lower_limit_[13], motor_lower_limit_[14], motor_lower_limit_[15],
+            motor_lower_limit_[16], motor_lower_limit_[17], motor_lower_limit_[18], motor_lower_limit_[19],
+            motor_lower_limit_[20], motor_lower_limit_[21], motor_lower_limit_[22]);
+        RCLCPP_INFO(this->get_logger(),
+                    "motor_higher_limit: %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, "
+                    "%f, %f, %f, %f, %f, %f",
                     motor_higher_limit_[0], motor_higher_limit_[1], motor_higher_limit_[2],
                     motor_higher_limit_[3], motor_higher_limit_[4], motor_higher_limit_[5],
                     motor_higher_limit_[6], motor_higher_limit_[7], motor_higher_limit_[8],
-                    motor_higher_limit_[9], motor_higher_limit_[10], motor_higher_limit_[11]);
+                    motor_higher_limit_[9], motor_higher_limit_[10], motor_higher_limit_[11],
+                    motor_higher_limit_[12], motor_higher_limit_[13], motor_higher_limit_[14],
+                    motor_higher_limit_[15], motor_higher_limit_[16], motor_higher_limit_[17],
+                    motor_higher_limit_[18], motor_higher_limit_[19], motor_higher_limit_[20],
+                    motor_higher_limit_[21], motor_higher_limit_[22]);
+        RCLCPP_INFO(this->get_logger(),
+                    "motor_default_angle: %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, "
+                    "%f, %f, %f, %f, %f, %f, %f",
+                    motor_default_angle_[0], motor_default_angle_[1], motor_default_angle_[2],
+                    motor_default_angle_[3], motor_default_angle_[4], motor_default_angle_[5],
+                    motor_default_angle_[6], motor_default_angle_[7], motor_default_angle_[8],
+                    motor_default_angle_[9], motor_default_angle_[10], motor_default_angle_[11],
+                    motor_default_angle_[12], motor_default_angle_[13], motor_default_angle_[14],
+                    motor_default_angle_[15], motor_default_angle_[16], motor_default_angle_[17],
+                    motor_default_angle_[18], motor_default_angle_[19], motor_default_angle_[20],
+                    motor_default_angle_[21], motor_default_angle_[22]);
+        RCLCPP_INFO(this->get_logger(),
+                    "usd2urdf: %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, "
+                    "%d, %d, %d, %d",
+                    usd2urdf_[0], usd2urdf_[1], usd2urdf_[2], usd2urdf_[3], usd2urdf_[4], usd2urdf_[5],
+                    usd2urdf_[6], usd2urdf_[7], usd2urdf_[8], usd2urdf_[9], usd2urdf_[10], usd2urdf_[11],
+                    usd2urdf_[12], usd2urdf_[13], usd2urdf_[14], usd2urdf_[15], usd2urdf_[16], usd2urdf_[17],
+                    usd2urdf_[18], usd2urdf_[19], usd2urdf_[20], usd2urdf_[21], usd2urdf_[22]);
 
         for (int i = 0; i < frame_stack_; i++) {
-            hist_obs_.push_back(std::vector<float>(47, 0.0f));  // 填充 frame_stack_ 个零向量
+            hist_obs_.push_back(std::vector<float>(78, 0.0f));  // 填充 frame_stack_ 个零向量
         }
         env_ = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "ONNXRuntimeInference");
         Ort::SessionOptions session_options;
@@ -185,7 +232,7 @@ class Inference : public rclcpp::Node {
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
     rclcpp::TimerBase::SharedPtr timer_;
     int step_;
-    std::vector<float> obs_, act_, last_act_;
+    std::vector<float> obs_, act_, last_act_, last_output_;
     float act_alpha_, gyro_alpha_, angle_alpha_;
     std::deque<std::vector<float>> hist_obs_;
     std::vector<float> left_leg_obs_, right_leg_obs_, left_arm_obs_, right_arm_obs_, imu_obs_;
@@ -194,9 +241,11 @@ class Inference : public rclcpp::Node {
     float obs_scales_lin_vel_, obs_scales_ang_vel_, obs_scales_dof_pos_, obs_scales_dof_vel_,
         obs_scales_gravity_b_, clip_observations_;
     float action_scale_, clip_actions_;
-    std::vector<float> motor_lower_limit_, motor_higher_limit_;
+    std::vector<float> motor_lower_limit_, motor_higher_limit_, motor_default_angle_;
+    std::vector<int> usd2urdf_;
     std::shared_mutex infer_mutex_;
     float last_roll_, last_pitch_, last_yaw_;
+
     void subs_joy_callback(const std::shared_ptr<sensor_msgs::msg::Joy> msg) {
         std::unique_lock lock(infer_mutex_);
         vx_ = msg->axes[5] * 0.2;
@@ -209,6 +258,7 @@ class Inference : public rclcpp::Node {
             dyaw_ = 0.0;
         }
     }
+
     void subs_left_leg_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
         std::unique_lock lock(infer_mutex_);
         for (int i = 0; i < 6; i++) {
@@ -318,25 +368,31 @@ class Inference : public rclcpp::Node {
                 obs_[8] = dyaw_ * obs_scales_ang_vel_;
                 // RCLCPP_INFO(this->get_logger(), "obs_[4]: %f", obs_[4]);
 
+                std::vector<float> joint_obs;
+                joint_obs.resize(46);
                 for (int i = 0; i < 6; i++) {
-                    obs_[9 + i] = left_leg_obs_[i] * obs_scales_dof_pos_;
-                    obs_[32 + i] = left_leg_obs_[6 + i] * obs_scales_dof_vel_;
+                    joint_obs[i] = left_leg_obs_[i] * obs_scales_dof_pos_;
+                    joint_obs[23 + i] = left_leg_obs_[6 + i] * obs_scales_dof_vel_;
                 }
                 for (int i = 0; i < 7; i++) {
-                    obs_[15 + i] = right_leg_obs_[i] * obs_scales_dof_pos_;
-                    obs_[38 + i] = right_leg_obs_[7 + i] * obs_scales_dof_vel_;
+                    joint_obs[6 + i] = right_leg_obs_[i] * obs_scales_dof_pos_;
+                    joint_obs[29 + i] = right_leg_obs_[7 + i] * obs_scales_dof_vel_;
                 }
                 for (int i = 0; i < 5; i++) {
-                    obs_[22 + i] = left_arm_obs_[i] * obs_scales_dof_pos_;
-                    obs_[45 + i] = left_arm_obs_[5 + i] * obs_scales_dof_vel_;
+                    joint_obs[13 + i] = left_arm_obs_[i] * obs_scales_dof_pos_;
+                    joint_obs[36 + i] = left_arm_obs_[5 + i] * obs_scales_dof_vel_;
                 }
                 for (int i = 0; i < 5; i++) {
-                    obs_[27 + i] = left_arm_obs_[i] * obs_scales_dof_pos_;
-                    obs_[50 + i] = left_arm_obs_[5 + i] * obs_scales_dof_vel_;
+                    joint_obs[18 + i] = right_arm_obs_[i] * obs_scales_dof_pos_;
+                    joint_obs[41 + i] = right_arm_obs_[5 + i] * obs_scales_dof_vel_;
+                }
+                for (int i = 0; i < 23; i++) {
+                    obs_[9 + i] = joint_obs[usd2urdf_[i]];
+                    obs_[32 + i] = joint_obs[23 + usd2urdf_[i]];
                 }
 
                 for (int i = 0; i < 23; i++) {
-                    obs_[55 + i] = last_act_[i];
+                    obs_[55 + i] = last_output_[i];
                 }
                 std::transform(obs_.begin(), obs_.end(), obs_.begin(), [this](float val) {
                     return std::clamp(val, -clip_observations_, clip_observations_);
@@ -346,7 +402,7 @@ class Inference : public rclcpp::Node {
             }
             std::vector<float> input(78 * frame_stack_);
             for (int i = 0; i < frame_stack_; i++) {
-                std::copy(hist_obs_[i].begin(), hist_obs_[i].end(), input.begin() + i * 47);
+                std::copy(hist_obs_[i].begin(), hist_obs_[i].end(), input.begin() + i * 78);
             }
             auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
             std::vector<const char *> input_names_raw(num_inputs_);
@@ -372,13 +428,15 @@ class Inference : public rclcpp::Node {
                 output.insert(output.end(), data, data + count);
             }
             act_.resize(output.size());
-            std::transform(output.begin(), output.end(), act_.begin(),
-                           [this](float val) { return val * action_scale_; });
-            std::transform(act_.begin(), act_.end(), act_.begin(),
-                           [this](float val) { return std::clamp(val, -clip_actions_, clip_actions_); });
-            for (int i = 0; i < act_.size(); i++) {
-                act_[i] = std::max(motor_lower_limit_[i], std::min(act_[i], motor_higher_limit_[i]));
+            for (int i = 0; i < output.size(); i++) {
+                output[i] = std::clamp(output[i], -clip_actions_, clip_actions_);
+                act_[usd2urdf_[i]] = output[i];
+                act_[usd2urdf_[i]] = act_[usd2urdf_[i]] * action_scale_;
+                act_[usd2urdf_[i]] =
+                    std::max(motor_lower_limit_[usd2urdf_[i]],
+                             std::min(act_[usd2urdf_[i]], motor_higher_limit_[usd2urdf_[i]]));
             }
+            last_output_ = output;
         }
         for (size_t i = 0; i < act_.size(); i++) {
             act_[i] = act_alpha_ * act_[i] + (1 - act_alpha_) * last_act_[i];

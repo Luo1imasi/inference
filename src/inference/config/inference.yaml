@@ -1,6 +1,6 @@
 Inference:
     ros__parameters:
-        model_name: "policy_1.onnx"
+        model_name: "policy.onnx"
         act_alpha: 1.0
         gyro_alpha: 1.0
         angle_alpha: 1.0
@@ -17,8 +17,10 @@ Inference:
         obs_scales_dof_vel: 1.0
         obs_scales_gravity_b: 1.0
         clip_observations: 18.0
-        action_scale: 0.7
+        action_scale: 0.25
         clip_actions: 18.0
-        motor_lower_limit: [-0.15,-1.0,-1.0,-0.6,-1.0,-0.5,-0.7,-1.2,-1.0,-1.5,-1.0,-0.5] #//TODO need to be set
-        motor_higher_limit: [0.7, 1.2, 1.0, 1.5, 1.0, 0.5, 0.15, 1.0, 1.0, 0.6, 1.0, 0.5]
+        usd2urdf: [0, 6, 12, 1, 7, 13, 18, 2, 8, 14, 19, 3, 9, 15, 20, 4, 10, 16, 21, 5, 11, 17, 22]
+        motor_default_angle: [0.0, 0.0, -0.24, 0.48, -0.24, 0.0, 0.0, 0.0, -0.24, 0.48, -0.24, 0.0, 0.0, 0.2, 0.0, 0.0, 1.0, 0.0, 0.2, 0.0, 0.0, 1.0, 0.0]
+        motor_lower_limit: [-0.2,-0.2,-2.5, 0.0,-0.6,-0.5,-1.0,-2.0,-2.5, 0.0,-0.6,-0.5,-2.62,-2.0,-0.25,-2.6,-1.00,-1.57,-2.0,-2.25,-2.6,-1.00,-1.57]
+        motor_higher_limit: [1.0, 2.0, 0.8, 2.5, 0.6, 0.5, 0.2, 0.2, 0.8, 2.5, 0.6, 0.5, 2.62, 2.0, 2.25, 2.6, 1.57, 1.57, 2.0, 0.25, 2.6, 1.57, 1.57]
 
