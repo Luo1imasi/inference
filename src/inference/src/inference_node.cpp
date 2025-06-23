@@ -248,12 +248,12 @@ class Inference : public rclcpp::Node {
 
     void subs_joy_callback(const std::shared_ptr<sensor_msgs::msg::Joy> msg) {
         std::unique_lock lock(infer_mutex_);
-        vx_ = msg->axes[5] * 0.2;
-        vy_ = msg->axes[4] * 0.2;
-        if (msg->buttons[7] == 1) {
-            dyaw_ = msg->buttons[7] * 0.4;
-        } else if (msg->buttons[8] == 1) {
-            dyaw_ = -msg->buttons[8] * 0.4;
+        vx_ = msg->axes[3] * 0.2;
+        vy_ = msg->axes[2] * 0.2;
+        if (msg->buttons[6] == 1) {
+            dyaw_ = msg->buttons[6] * 0.4;
+        } else if (msg->buttons[7] == 1) {
+            dyaw_ = -msg->buttons[7] * 0.4;
         } else {
             dyaw_ = 0.0;
         }
