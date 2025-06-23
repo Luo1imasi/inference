@@ -16,7 +16,7 @@
 class Inference : public rclcpp::Node {
    public:
     Inference() : Node("inference_node") {
-        obs_.resize(47);
+        obs_.resize(78);
         act_.resize(23);
         last_act_.resize(23);
         left_leg_obs_.resize(12);
