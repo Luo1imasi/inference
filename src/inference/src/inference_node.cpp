@@ -27,7 +27,6 @@ class Inference : public rclcpp::Node {
         imu_obs_[0] = 1.0, imu_obs_[1] = 0.0, imu_obs_[2] = 0.0, imu_obs_[3] = 0.0;
         motor_lower_limit_.resize(23);
         motor_higher_limit_.resize(23);
-        motor_default_angle_.resize(23);
         usd2urdf_.resize(23);
         last_output_.resize(23);
         step_ = 0;
@@ -60,10 +59,6 @@ class Inference : public rclcpp::Node {
             std::vector<float>{1.0,  2.0, 0.8,  2.5, 0.6,  0.5,  0.2, 0.2,  0.8, 2.5,  0.6, 0.5,
                                2.62, 2.0, 2.25, 2.6, 1.57, 1.57, 2.0, 0.25, 2.6, 1.57, 1.57});
         this->declare_parameter<std::vector<float>>(
-            "motor_default_angle",
-            std::vector<float>{0.0, 0.0, -0.24, 0.48, -0.24, 0.0, 0.0, 0.0, -0.24, 0.48, -0.24, 0.0,
-                               0.0, 0.2, 0.0,   0.0,  1.0,   0.0, 0.2, 0.0, 0.0,   1.0,  0.0});
-        this->declare_parameter<std::vector<float>>(
             "usd2urdf", std::vector<float>{0, 6,  12, 1, 7,  13, 18, 2, 8,  14, 19, 3,
                                            9, 15, 20, 4, 10, 16, 21, 5, 11, 17, 22});
 
@@ -92,9 +87,6 @@ class Inference : public rclcpp::Node {
                        [](double val) { return static_cast<float>(val); });
         this->get_parameter("motor_higher_limit", tmp);
         std::transform(tmp.begin(), tmp.end(), motor_higher_limit_.begin(),
-                       [](double val) { return static_cast<float>(val); });
-        this->get_parameter("motor_default_angle", tmp);
-        std::transform(tmp.begin(), tmp.end(), motor_default_angle_.begin(),
                        [](double val) { return static_cast<float>(val); });
         this->get_parameter("usd2urdf", tmp);
         std::transform(tmp.begin(), tmp.end(), usd2urdf_.begin(),
@@ -140,17 +132,6 @@ class Inference : public rclcpp::Node {
                     motor_higher_limit_[15], motor_higher_limit_[16], motor_higher_limit_[17],
                     motor_higher_limit_[18], motor_higher_limit_[19], motor_higher_limit_[20],
                     motor_higher_limit_[21], motor_higher_limit_[22]);
-        RCLCPP_INFO(this->get_logger(),
-                    "motor_default_angle: %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, "
-                    "%f, %f, %f, %f, %f, %f, %f",
-                    motor_default_angle_[0], motor_default_angle_[1], motor_default_angle_[2],
-                    motor_default_angle_[3], motor_default_angle_[4], motor_default_angle_[5],
-                    motor_default_angle_[6], motor_default_angle_[7], motor_default_angle_[8],
-                    motor_default_angle_[9], motor_default_angle_[10], motor_default_angle_[11],
-                    motor_default_angle_[12], motor_default_angle_[13], motor_default_angle_[14],
-                    motor_default_angle_[15], motor_default_angle_[16], motor_default_angle_[17],
-                    motor_default_angle_[18], motor_default_angle_[19], motor_default_angle_[20],
-                    motor_default_angle_[21], motor_default_angle_[22]);
         RCLCPP_INFO(this->get_logger(),
                     "usd2urdf: %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, "
                     "%d, %d, %d, %d",
@@ -241,7 +222,7 @@ class Inference : public rclcpp::Node {
     float obs_scales_lin_vel_, obs_scales_ang_vel_, obs_scales_dof_pos_, obs_scales_dof_vel_,
         obs_scales_gravity_b_, clip_observations_;
     float action_scale_, clip_actions_;
-    std::vector<float> motor_lower_limit_, motor_higher_limit_, motor_default_angle_;
+    std::vector<float> motor_lower_limit_, motor_higher_limit_;
     std::vector<int> usd2urdf_;
     std::shared_mutex infer_mutex_;
     float last_roll_, last_pitch_, last_yaw_;
