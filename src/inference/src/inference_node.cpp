@@ -254,12 +254,6 @@ class Inference : public rclcpp::Node {
             right_leg_obs_[i] = msg->position[i];
             right_leg_obs_[7 + i] = msg->velocity[i];
         }
-        right_leg_obs_[2] = -right_leg_obs_[2];
-        right_leg_obs_[3] = -right_leg_obs_[3];
-        right_leg_obs_[4] = -right_leg_obs_[4];
-        right_leg_obs_[9] = -right_leg_obs_[9];
-        right_leg_obs_[10] = -right_leg_obs_[10];
-        right_leg_obs_[11] = -right_leg_obs_[11];
     }
 
     void subs_left_arm_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg) {
@@ -276,10 +270,6 @@ class Inference : public rclcpp::Node {
             right_arm_obs_[i] = msg->position[i];
             right_arm_obs_[5 + i] = msg->velocity[i];
         }
-        right_arm_obs_[0] = -right_arm_obs_[0];
-        right_arm_obs_[3] = -right_arm_obs_[3];
-        right_arm_obs_[5] = -right_arm_obs_[5];
-        right_arm_obs_[8] = -right_arm_obs_[8];
     }
 
     void subs_IMU_callback(const std::shared_ptr<sensor_msgs::msg::Imu> msg) {
@@ -305,7 +295,7 @@ class Inference : public rclcpp::Node {
         auto right_leg_message = sensor_msgs::msg::JointState();
         right_leg_message.header.stamp = this->now();
         right_leg_message.name = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"};
-        right_leg_message.position = {act_[6], act_[7], -act_[8], -act_[9], -act_[10], act_[11], act_[12]};
+        right_leg_message.position = {act_[6], act_[7], act_[8], act_[9], act_[10], act_[11], act_[12]};
         right_leg_message.velocity = {0, 0, 0, 0, 0, 0, 0};
         right_leg_message.effort = {0, 0, 0, 0, 0, 0, 0};
         right_leg_publisher_->publish(right_leg_message);
@@ -321,7 +311,7 @@ class Inference : public rclcpp::Node {
         auto right_arm_message = sensor_msgs::msg::JointState();
         right_arm_message.header.stamp = this->now();
         right_arm_message.name = {"joint1", "joint2", "joint3", "joint4", "joint5"};
-        right_arm_message.position = {-act_[18], act_[19], act_[20], -act_[21], act_[22]};
+        right_arm_message.position = {act_[18], act_[19], act_[20], act_[21], act_[22]};
         right_arm_message.velocity = {0, 0, 0, 0, 0};
         right_arm_message.effort = {0, 0, 0, 0, 0};
         right_arm_publisher_->publish(right_arm_message);
