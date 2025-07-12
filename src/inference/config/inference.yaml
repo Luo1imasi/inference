@@ -5,21 +5,21 @@ Inference:
         gyro_alpha: 1.0
         angle_alpha: 1.0
         frame_stack: 10
-        decimation: 4
+        decimation: 5
         intra_threads: -1
-        dt: 0.005
-        vx: 0.0
+        dt: 0.004
+        vx: 0.3
         vy: 0.0
         dyaw: 0.0
         obs_scales_lin_vel: 1.0
-        obs_scales_ang_vel: 1.0
+        obs_scales_ang_vel: 0.25
         obs_scales_dof_pos: 1.0
-        obs_scales_dof_vel: 1.0
+        obs_scales_dof_vel: 0.05
         obs_scales_gravity_b: 1.0
         clip_observations: 18.0
         action_scale: 0.25
         clip_actions: 18.0
         usd2urdf: [0, 6, 12, 1, 7, 13, 18, 2, 8, 14, 19, 3, 9, 15, 20, 4, 10, 16, 21, 5, 11, 17, 22]
-        joint_lower_limit: [-1.0,-0.2,-2.5, 0.0,-0.6,-0.5,-0.2,-2.0,-2.5, 0.0,-0.6,-0.5,-2.62,-2.0,-0.25,-2.6,-1.00,-1.57,-2.0,-2.25,-2.6,-1.00,-1.57]
-        joint_higher_limit: [0.2, 2.0, 0.8, 2.5, 0.6, 0.5, 1.0, 0.2, 0.8, 2.5, 0.6, 0.5, 2.62, 2.0, 2.25, 2.6, 1.57, 1.57, 2.0, 0.25, 2.6, 1.57, 1.57]
+        joint_lower_limit: [-0.6,-0.15,-1.2,-0.5,-0.5,-0.15,-0.15,-0.8,-1.2,-0.5,-0.5,-0.15,0.0,-1.0,-0.15,-0.3,-1.00,0.0,-1.0,-0.5,-0.3,-1.00,0.0]
+        joint_higher_limit: [0.15, 0.8, 0.8, 1.6, 0.7, 0.15, 0.6, 0.15, 0.8, 1.6, 0.7, 0.15,0.0, 0.7, 0.5, 0.3, 0.5, 0.0, 0.7, 0.15, 0.3, 0.5, 0.0]
 
