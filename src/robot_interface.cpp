@@ -127,6 +127,7 @@ void RobotInterface::apply_action(std::vector<float> p,
     if(!is_init_.load()){
         return;
     }
+    const bool use_close_chain_tau = !close_chain_joint_idx_.empty() && ankle_decouple_;
 
     {
         std::unique_lock<std::mutex> lock(joint_mutex_);
@@ -139,7 +140,7 @@ void RobotInterface::apply_action(std::vector<float> p,
             }
         });
 
-        if (!close_chain_joint_idx_.empty() && ankle_decouple_){
+        if (use_close_chain_tau){
             auto kp_cc = [&](size_t i) -> double {
                 return kp.empty() ? robot_cfg_->kp_[robot_cfg_->close_chain_motor_idx_[i]]
                                   : static_cast<double>(kp[close_chain_joint_idx_[i]]);
@@ -148,14 +149,13 @@ void RobotInterface::apply_action(std::vector<float> p,
                 return kd.empty() ? robot_cfg_->kd_[robot_cfg_->close_chain_motor_idx_[i]]
                                   : static_cast<double>(kd[close_chain_joint_idx_[i]]);
             };
+            auto vel_target_cc = [&](size_t i) -> double {
+                return v.empty() ? 0.0 : static_cast<double>(v[close_chain_joint_idx_[i]]);
+            };
+            auto tau_ff_cc = [&](size_t i) -> double {
+                return tau.empty() ? 0.0 : static_cast<double>(tau[close_chain_joint_idx_[i]]);
+            };
 
-            bool refresh = false;
-            for (size_t i = 0; i < close_chain_joint_idx_.size(); ++i) {
-                if (p[close_chain_joint_idx_[i]] != last_ankle_joint_target_[i]) {
-                    refresh = true;
-                }
-                last_ankle_joint_target_[i] = p[close_chain_joint_idx_[i]];
-            }
             forward_close_chain();
 
             Eigen::VectorXd q(2), vel(2), tau_cc(2);
@@ -166,19 +166,11 @@ void RobotInterface::apply_action(std::vector<float> p,
                 int idx2 = close_chain_joint_idx_[off + 1];
                 q << joint_q_[idx1], joint_q_[idx2];
                 vel << joint_vel_[idx1], joint_vel_[idx2];
-                tau_cc << joint_tau_[idx1], joint_tau_[idx2];
-                if (refresh) {
-                    tau_cc << kp_cc(off)     * (p[idx1] - q[0]) + kd_cc(off)     * (0.0 - vel[0]),
-                             kp_cc(off + 1) * (p[idx2] - q[1]) + kd_cc(off + 1) * (0.0 - vel[1]);
-                    ankle_decouple_->get_decoupleQVT(q, vel, tau_cc, left);
-                    p[idx1] = static_cast<float>(q[0] + (tau_cc[0] + kd_cc(off)     * vel[0]) / kp_cc(off));
-                    p[idx2] = static_cast<float>(q[1] + (tau_cc[1] + kd_cc(off + 1) * vel[1]) / kp_cc(off + 1));
-                    cached_ankle_action_[off]     = p[idx1];
-                    cached_ankle_action_[off + 1] = p[idx2];
-                } else {
-                    p[idx1] = cached_ankle_action_[off];
-                    p[idx2] = cached_ankle_action_[off + 1];
-                }
+                tau_cc << kp_cc(off)     * (p[idx1] - q[0]) + kd_cc(off)     * (vel_target_cc(off)     - vel[0]) + tau_ff_cc(off),
+                          kp_cc(off + 1) * (p[idx2] - q[1]) + kd_cc(off + 1) * (vel_target_cc(off + 1) - vel[1]) + tau_ff_cc(off + 1);
+                ankle_decouple_->get_decoupleQVT(q, vel, tau_cc, left);
+                p[idx1] = static_cast<float>(tau_cc[0]);
+                p[idx2] = static_cast<float>(tau_cc[1]);
             }
         }
     }
@@ -187,11 +179,23 @@ void RobotInterface::apply_action(std::vector<float> p,
         std::unique_lock<std::mutex> lock(motors_mutex_);
         for (size_t i = 0; i < motor_pos_target_.size(); i++){
             const size_t ji = motor2urdf_[i];
-            motor_pos_target_[i] = p[ji];
-            motor_vel_target_[i] = v.empty()  ? 0.0f : v[ji];
-            motor_kp_target_[i]  = kp.empty() ? static_cast<float>(robot_cfg_->kp_[i]) : kp[ji];
-            motor_kd_target_[i]  = kd.empty() ? static_cast<float>(robot_cfg_->kd_[i]) : kd[ji];
-            motor_tau_target_[i] = tau.empty() ? 0.0f : tau[ji];
+            const bool close_chain_tau = use_close_chain_tau &&
+                std::find(robot_cfg_->close_chain_motor_idx_.begin(),
+                          robot_cfg_->close_chain_motor_idx_.end(),
+                          static_cast<long int>(i)) != robot_cfg_->close_chain_motor_idx_.end();
+            if (close_chain_tau) {
+                motor_pos_target_[i] = 0.0f;
+                motor_vel_target_[i] = 0.0f;
+                motor_kp_target_[i]  = 0.0f;
+                motor_kd_target_[i]  = 0.0f;
+                motor_tau_target_[i] = p[ji] * robot_cfg_->motor_sign_[i];
+            } else {
+                motor_pos_target_[i] = p[ji];
+                motor_vel_target_[i] = v.empty()  ? 0.0f : v[ji] * robot_cfg_->motor_sign_[i];
+                motor_kp_target_[i]  = kp.empty() ? static_cast<float>(robot_cfg_->kp_[i]) : kp[ji];
+                motor_kd_target_[i]  = kd.empty() ? static_cast<float>(robot_cfg_->kd_[i]) : kd[ji];
+                motor_tau_target_[i] = tau.empty() ? 0.0f : tau[ji] * robot_cfg_->motor_sign_[i];
+            }
         }
     }
 
