@@ -3,6 +3,22 @@
 
 #include "inference_node.hpp"
 
+void InferenceNode::update_obs_history(std::vector<float>& history,
+                                       const std::vector<float>& obs,
+                                       int obs_num, int frame_stack,
+                                       bool is_first_frame) {
+    if (is_first_frame) {
+        for (int frame = 0; frame < frame_stack; frame++) {
+            std::copy(obs.begin(), obs.end(), history.begin() + frame * obs_num);
+        }
+        return;
+    }
+    std::move(history.begin() + obs_num,
+              history.begin() + frame_stack * obs_num,
+              history.begin());
+    std::copy(obs.begin(), obs.end(), history.begin() + (frame_stack - 1) * obs_num);
+}
+
 ObsStackOrder InferenceNode::parse_obs_stack_order(const std::string& stack_order_name) {
     if (stack_order_name == "frame_major") {
         return ObsStackOrder::FrameMajor;
@@ -17,16 +33,7 @@ void InferenceNode::update_stacked_obs(std::vector<float>& input_buffer, const s
                                        int obs_num, int frame_stack, ObsStackOrder stack_order,
                                        const std::vector<int>& field_sizes, bool is_first_frame) {
     if (stack_order == ObsStackOrder::FrameMajor) {
-        if (is_first_frame) {
-            for (int frame = 0; frame < frame_stack; frame++) {
-                std::copy(obs.begin(), obs.end(), input_buffer.begin() + frame * obs_num);
-            }
-        } else {
-            std::move(input_buffer.begin() + obs_num,
-                      input_buffer.begin() + frame_stack * obs_num,
-                      input_buffer.begin());
-            std::copy(obs.begin(), obs.end(), input_buffer.begin() + (frame_stack - 1) * obs_num);
-        }
+        update_obs_history(input_buffer, obs, obs_num, frame_stack, is_first_frame);
         return;
     }
 
@@ -51,7 +58,18 @@ void InferenceNode::update_stacked_obs(std::vector<float>& input_buffer, const s
     }
 }
 
-void InferenceNode::setup_model(std::unique_ptr<ModelContext>& ctx, std::string model_path, int input_size){
+void InferenceNode::gather_sparse_obs_history(
+    std::vector<float>& input_buffer,
+    const std::vector<float>& obs_history,
+    const std::vector<ObsHistorySlice>& gather_plan) {
+    auto output = input_buffer.begin();
+    for (const ObsHistorySlice& slice : gather_plan) {
+        output = std::copy_n(
+            obs_history.begin() + slice.history_offset, slice.size, output);
+    }
+}
+
+void InferenceNode::setup_model(std::unique_ptr<ModelContext>& ctx, std::string model_path, int input_size) {
     if (!ctx) {
         ctx = std::make_unique<ModelContext>();
     }
@@ -208,9 +226,6 @@ void InferenceNode::reset_policy_runtime(PolicyRuntime& policy) {
     for (auto& segment : policy.obs_segments) {
         std::fill(segment.begin(), segment.end(), 0.0f);
     }
-    for (auto& segment : policy.extra_obs_segments) {
-        std::fill(segment.begin(), segment.end(), 0.0f);
-    }
     if (policy.ctx) {
         std::fill(policy.ctx->input_buffer.begin(), policy.ctx->input_buffer.end(), 0.0f);
         std::fill(policy.ctx->output_buffer.begin(), policy.ctx->output_buffer.end(), 0.0f);
@@ -288,11 +303,15 @@ void InferenceNode::inference() {
                 return std::clamp(val, -clip_observations_, clip_observations_);
             });
 
-            update_stacked_obs(policy.ctx->input_buffer, policy.obs, policy.obs_num, policy.frame_stack,
-                               policy.stack_order, policy.obs_layout_sizes, policy.is_first_frame);
-            if(policy.extra_obs_num > 0){
-                update_obs_segments(policy.extra_obs_segments, policy.extra_obs_layout);
-                flatten_obs_segments(policy.extra_obs_segments, policy.ctx->input_buffer.begin() + policy.frame_stack * policy.obs_num);
+            if (!policy.history_gather_plan.empty()) {
+                update_obs_history(policy.obs_history, policy.obs, policy.obs_num,
+                                   policy.frame_stack, policy.is_first_frame);
+                gather_sparse_obs_history(policy.ctx->input_buffer, policy.obs_history,
+                                          policy.history_gather_plan);
+            } else {
+                update_stacked_obs(policy.ctx->input_buffer, policy.obs, policy.obs_num,
+                                   policy.frame_stack, policy.stack_order,
+                                   policy.obs_layout_sizes, policy.is_first_frame);
             }
             if (policy.motion_loader) {
                 step_motion_frame();

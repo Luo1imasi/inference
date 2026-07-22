@@ -2,12 +2,10 @@ inference_node:
     ros__parameters:
         model_names: ["policy_attn_enc.onnx"]
         obs_layouts:
-          - "ang_vel:3, gravity_b:3, cmd_vel:3, dof_pos:23, dof_vel:23, last_action:23"
+          - "ang_vel:3, gravity_b:3, cmd_vel:3, dof_pos:23, dof_vel:23, last_action:23, perception:187@0"
         frame_stacks: [5]
         obs_stack_orders: ["frame_major"]
         act_alpha: 1.0
-        extra_obs_layouts:
-          - "perception:187"
         perception_obs_topic: "/robot_0/elevation_data"
         joint_num: 23
         decimation: 5

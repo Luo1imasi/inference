@@ -46,6 +46,13 @@ struct ObsSourceSpec {
     std::string name;
     const ObsSourceDefinition* source;
     int size;
+    // Empty keeps legacy contiguous stacking; otherwise values are explicit inference-tick lags.
+    std::vector<int> history_taps;
+};
+
+struct ObsHistorySlice {
+    size_t history_offset;
+    size_t size;
 };
 
 class InferenceNode : public rclcpp::Node {
@@ -75,10 +82,12 @@ class InferenceNode : public rclcpp::Node {
         std::vector<int> obs_layout_sizes;
         std::vector<std::vector<float>> obs_segments;
         std::vector<float> obs;
-        std::vector<ObsSourceSpec> extra_obs_layout;
-        std::vector<std::vector<float>> extra_obs_segments;
+        // Sparse mode only: complete frames ordered from oldest to newest.
+        std::vector<float> obs_history;
+        // Non-empty selects sparse mode and describes sequential copies into the model input.
+        std::vector<ObsHistorySlice> history_gather_plan;
         int obs_num = 0;
-        int extra_obs_num = 0;
+        int obs_input_num = 0;
         int frame_stack = 1;
         ObsStackOrder stack_order = ObsStackOrder::FrameMajor;
         std::unique_ptr<ModelContext> ctx;
@@ -107,9 +116,10 @@ class InferenceNode : public rclcpp::Node {
             for (size_t j = 0; j < policy.obs_layout.size(); j++) {
                 policy.obs_segments[j].resize(policy.obs_layout[j].size, 0.0f);
             }
-            policy.extra_obs_segments.resize(policy.extra_obs_layout.size());
-            for (size_t j = 0; j < policy.extra_obs_layout.size(); j++) {
-                policy.extra_obs_segments[j].resize(policy.extra_obs_layout[j].size, 0.0f);
+            if (!policy.history_gather_plan.empty()) {
+                policy.obs_history.resize(
+                    static_cast<size_t>(policy.obs_num) * static_cast<size_t>(policy.frame_stack),
+                    0.0f);
             }
             if (!policy.motion_path.empty()) {
                 policy.motion_loader = std::make_shared<MotionLoader>(policy.motion_path);
@@ -120,8 +130,7 @@ class InferenceNode : public rclcpp::Node {
                     throw std::runtime_error("Motion joint count mismatch: " + policy.motion_path);
                 }
             }
-            setup_model(policy.ctx, policy.model_path,
-                        policy.obs_num * policy.frame_stack + policy.extra_obs_num);
+            setup_model(policy.ctx, policy.model_path, policy.obs_input_num);
         }
         initialize_runtime_state();
         reset_runtime_state();
@@ -252,9 +261,14 @@ class InferenceNode : public rclcpp::Node {
                              const std::vector<ObsSourceSpec>& layout);
     void flatten_obs_segments(const std::vector<std::vector<float>>& segments,
                               std::vector<float>::iterator output_begin);
+    void update_obs_history(std::vector<float>& history, const std::vector<float>& obs,
+                            int obs_num, int frame_stack, bool is_first_frame);
     void update_stacked_obs(std::vector<float>& input_buffer, const std::vector<float>& obs,
                             int obs_num, int frame_stack, ObsStackOrder stack_order,
                             const std::vector<int>& field_sizes, bool is_first_frame);
+    void gather_sparse_obs_history(std::vector<float>& input_buffer,
+                                   const std::vector<float>& obs_history,
+                                   const std::vector<ObsHistorySlice>& gather_plan);
 
     // Observation getters.
     void get_cmd_vel_obs(std::vector<float>& segment);

@@ -3,6 +3,10 @@
 
 #include "inference_node.hpp"
 
+#include <charconv>
+#include <cctype>
+#include <utility>
+
 namespace {
 std::string trim_copy(const std::string& value) {
     const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char c) { return std::isspace(c) != 0; });
@@ -11,14 +15,6 @@ std::string trim_copy(const std::string& value) {
         return "";
     }
     return std::string(first, last);
-}
-
-ObsSourceSpec make_source_spec(const std::string& name, const ObsSourceDefinition& source, int size) {
-    ObsSourceSpec spec;
-    spec.name = name;
-    spec.source = &source;
-    spec.size = size;
-    return spec;
 }
 
 std::vector<std::string> split_obs_layout_spec(const std::string& layout_spec) {
@@ -36,6 +32,43 @@ std::vector<std::string> split_obs_layout_spec(const std::string& layout_spec) {
         start = end + 1;
     }
     return layout_specs;
+}
+
+int parse_decimal_integer(const std::string& text, int minimum_value,
+                          const std::string& error_message) {
+    int value = 0;
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (result.ec != std::errc() || result.ptr != text.data() + text.size() ||
+        value < minimum_value) {
+        throw std::runtime_error(error_message);
+    }
+    return value;
+}
+
+std::vector<int> parse_history_taps(const std::string& taps_spec,
+                                    const std::string& layout_name,
+                                    const std::string& raw_spec) {
+    const std::string error_message =
+        layout_name + " history taps must be non-negative integers separated by '|': " + raw_spec;
+    std::vector<int> taps;
+    size_t start = 0;
+    while (start <= taps_spec.size()) {
+        const size_t end = taps_spec.find('|', start);
+        const std::string tap_text = trim_copy(
+            taps_spec.substr(start, end == std::string::npos ? std::string::npos : end - start));
+        const int tap = parse_decimal_integer(tap_text, 0, error_message);
+        if (!taps.empty() && taps.back() <= tap) {
+            throw std::runtime_error(
+                layout_name + " history taps must be strictly descending: " + raw_spec);
+        }
+        taps.push_back(tap);
+
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    return taps;
 }
 
 }
@@ -59,27 +92,35 @@ const std::vector<ObsSourceDefinition>& InferenceNode::obs_source_definitions() 
 std::vector<ObsSourceSpec> InferenceNode::parse_obs_layout(
     const std::string& layout_spec,
     const std::string& layout_name) {
-    const std::vector<std::string> layout_specs = split_obs_layout_spec(layout_spec);
-    if (layout_specs.empty()) {
+    const std::vector<std::string> entries = split_obs_layout_spec(layout_spec);
+    if (entries.empty()) {
         throw std::runtime_error(layout_name + " must be explicitly configured");
     }
 
     std::vector<ObsSourceSpec> layout;
-    layout.reserve(layout_specs.size());
-    for (const std::string& raw_spec : layout_specs) {
-        const std::string spec = trim_copy(raw_spec);
-        const size_t separator = spec.find(':');
-        if (separator == std::string::npos || separator == 0 || separator == spec.size() - 1) {
-            throw std::runtime_error(layout_name + " entry must use 'name:size' format: " + raw_spec);
+    layout.reserve(entries.size());
+    for (const std::string& entry : entries) {
+        const size_t separator = entry.find(':');
+        if (separator == std::string::npos || separator == 0 || separator == entry.size() - 1) {
+            throw std::runtime_error(
+                layout_name + " entry must use 'name:size' or 'name:size@tap|tap' format: " + entry);
         }
 
-        const std::string name = trim_copy(spec.substr(0, separator));
-        const std::string size_text = trim_copy(spec.substr(separator + 1));
+        const std::string name = trim_copy(entry.substr(0, separator));
+        const std::string size_and_taps = trim_copy(entry.substr(separator + 1));
+        const size_t history_separator = size_and_taps.find('@');
+        const std::string size_text = trim_copy(size_and_taps.substr(0, history_separator));
         if (name.empty() || size_text.empty()) {
-            throw std::runtime_error(layout_name + " entry must use 'name:size' format: " + raw_spec);
+            throw std::runtime_error(
+                layout_name + " entry must use 'name:size' or 'name:size@tap|tap' format: " + entry);
         }
-        if (!std::all_of(size_text.begin(), size_text.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
-            throw std::runtime_error(layout_name + " field size must be a positive integer: " + raw_spec);
+        const int size = parse_decimal_integer(
+            size_text, 1, layout_name + " field size must be a positive integer: " + entry);
+
+        std::vector<int> history_taps;
+        if (history_separator != std::string::npos) {
+            history_taps = parse_history_taps(
+                size_and_taps.substr(history_separator + 1), layout_name, entry);
         }
 
         const auto& definitions = obs_source_definitions();
@@ -90,18 +131,16 @@ std::vector<ObsSourceSpec> InferenceNode::parse_obs_layout(
             throw std::runtime_error("Unsupported obs source: " + name);
         }
 
-        layout.push_back(make_source_spec(name, *source, std::stoi(size_text)));
+        layout.push_back({name, &*source, size, std::move(history_taps)});
     }
     return layout;
 }
 
 bool InferenceNode::has_obs_source(const std::string& source_name) const {
-    return std::any_of(policies_.begin(), policies_.end(), [this, &source_name](const PolicyRuntime& policy) {
-        const auto source_matches = [&source_name](const ObsSourceSpec& spec) {
-            return spec.name == source_name;
-        };
-        return std::any_of(policy.obs_layout.begin(), policy.obs_layout.end(), source_matches) ||
-               std::any_of(policy.extra_obs_layout.begin(), policy.extra_obs_layout.end(), source_matches);
+    return std::any_of(policies_.begin(), policies_.end(), [&source_name](const PolicyRuntime& policy) {
+        return std::any_of(
+            policy.obs_layout.begin(), policy.obs_layout.end(),
+            [&source_name](const ObsSourceSpec& spec) { return spec.name == source_name; });
     });
 }
 

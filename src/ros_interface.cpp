@@ -3,6 +3,8 @@
 
 #include "inference_node.hpp"
 
+#include <limits>
+
 void InferenceNode::load_config() {
     const std::string default_robot_dir = std::string(ROOT_DIR) + "robots/rpo";
     this->declare_parameter<std::string>("robot_name", "rpo");
@@ -13,7 +15,6 @@ void InferenceNode::load_config() {
     this->declare_parameter<std::vector<std::string>>("model_names", std::vector<std::string>{});
     this->declare_parameter<std::vector<std::string>>("motion_names", std::vector<std::string>{});
     this->declare_parameter<std::vector<std::string>>("obs_layouts", std::vector<std::string>{});
-    this->declare_parameter<std::vector<std::string>>("extra_obs_layouts", std::vector<std::string>{});
     this->declare_parameter<std::vector<long int>>("frame_stacks", std::vector<long int>{});
     this->declare_parameter<std::vector<std::string>>("obs_stack_orders", std::vector<std::string>{});
     this->declare_parameter<float>("act_alpha", 0.9);
@@ -38,7 +39,6 @@ void InferenceNode::load_config() {
     std::vector<std::string> model_names;
     std::vector<std::string> motion_names;
     std::vector<std::string> obs_layouts;
-    std::vector<std::string> extra_obs_layouts;
     std::vector<long int> frame_stacks;
     std::vector<std::string> obs_stack_orders;
     std::string robot_name;
@@ -53,7 +53,6 @@ void InferenceNode::load_config() {
     this->get_parameter("model_names", model_names);
     this->get_parameter("motion_names", motion_names);
     this->get_parameter("obs_layouts", obs_layouts);
-    this->get_parameter("extra_obs_layouts", extra_obs_layouts);
     this->get_parameter("frame_stacks", frame_stacks);
     this->get_parameter("obs_stack_orders", obs_stack_orders);
     this->get_parameter("act_alpha", act_alpha_);
@@ -94,7 +93,6 @@ void InferenceNode::load_config() {
         }
     };
     require_policy_count(obs_layouts, "obs_layouts");
-    require_empty_or_policy_count(extra_obs_layouts, "extra_obs_layouts");
     require_policy_count(frame_stacks, "frame_stacks");
     require_policy_count(obs_stack_orders, "obs_stack_orders");
     require_empty_or_policy_count(motion_names, "motion_names");
@@ -110,42 +108,99 @@ void InferenceNode::load_config() {
     for (size_t i = 0; i < policy_count; i++) {
         const std::string& policy_model_name = model_names[i];
         const std::string policy_motion_name = motion_names.empty() ? "" : motion_names[i];
-        const std::string policy_extra_obs_layout = extra_obs_layouts.empty() ? "" : extra_obs_layouts[i];
-        const int policy_frame_stack = static_cast<int>(frame_stacks[i]);
-        const std::string& policy_obs_stack_order_name = obs_stack_orders[i];
+        const long int policy_frame_stack = frame_stacks[i];
         if (policy_model_name.empty()) {
             throw std::runtime_error("model_names[" + std::to_string(i) + "] must not be empty");
         }
-        if (policy_frame_stack <= 0) {
-            throw std::runtime_error("frame_stacks[" + std::to_string(i) + "] must be positive");
+        if (policy_frame_stack <= 0 ||
+            policy_frame_stack > static_cast<long int>(std::numeric_limits<int>::max())) {
+            throw std::runtime_error(
+                "frame_stacks[" + std::to_string(i) + "] must be a positive 32-bit integer");
         }
-
         PolicyRuntime policy;
         policy.name = policy_model_name;
         policy.model_path = resolve_asset_path(model_dir, policy_model_name);
+        policy.frame_stack = static_cast<int>(policy_frame_stack);
+        policy.stack_order = parse_obs_stack_order(obs_stack_orders[i]);
         if (!policy_motion_name.empty()) {
             policy.motion_path = resolve_asset_path(motion_dir, policy_motion_name);
         }
         policy.obs_layout = parse_obs_layout(obs_layouts[i], "obs_layouts[" + std::to_string(i) + "]");
         policy.obs_layout_sizes.reserve(policy.obs_layout.size());
+        bool has_sparse_history = false;
         for (const ObsSourceSpec& source : policy.obs_layout) {
+            if (source.size > std::numeric_limits<int>::max() - policy.obs_num) {
+                throw std::runtime_error("obs_layouts[" + std::to_string(i) + "] is too large");
+            }
             policy.obs_layout_sizes.push_back(source.size);
             policy.obs_num += source.size;
             if (source.name == "perception") {
                 perception_obs_num_ = source.size;
             }
-        }
-        if (!policy_extra_obs_layout.empty()) {
-            policy.extra_obs_layout = parse_obs_layout(policy_extra_obs_layout, "extra_obs_layouts[" + std::to_string(i) + "]");
-            for (const ObsSourceSpec& source : policy.extra_obs_layout) {
-                policy.extra_obs_num += source.size;
-                if (source.name == "perception") {
-                    perception_obs_num_ = source.size;
+            if (!source.history_taps.empty()) {
+                has_sparse_history = true;
+                if (source.history_taps.front() >= policy.frame_stack) {
+                    throw std::runtime_error(
+                        "obs_layouts[" + std::to_string(i) + "] history tap " +
+                        std::to_string(source.history_taps.front()) + " for source '" +
+                        source.name + "' must be smaller than frame_stacks[" +
+                        std::to_string(i) + "]");
                 }
             }
         }
-        policy.frame_stack = policy_frame_stack;
-        policy.stack_order = parse_obs_stack_order(policy_obs_stack_order_name);
+
+        const long long dense_history_num =
+            static_cast<long long>(policy.obs_num) * policy.frame_stack;
+        if (dense_history_num > static_cast<long long>(std::numeric_limits<int>::max())) {
+            throw std::runtime_error(
+                "obs_layouts[" + std::to_string(i) + "] history buffer is too large");
+        }
+        policy.obs_input_num = static_cast<int>(dense_history_num);
+
+        if (has_sparse_history) {
+            size_t input_offset = 0;
+            const auto append_history_slice =
+                [&policy, &input_offset](size_t obs_offset,
+                                         const ObsSourceSpec& source,
+                                         int tap) {
+                    const size_t frame = static_cast<size_t>(policy.frame_stack - 1 - tap);
+                    policy.history_gather_plan.push_back({
+                        frame * static_cast<size_t>(policy.obs_num) + obs_offset,
+                        static_cast<size_t>(source.size),
+                    });
+                    input_offset += static_cast<size_t>(source.size);
+                };
+
+            if (policy.stack_order == ObsStackOrder::ObsMajor) {
+                size_t obs_offset = 0;
+                for (const ObsSourceSpec& source : policy.obs_layout) {
+                    if (source.history_taps.empty()) {
+                        for (int tap = policy.frame_stack - 1; tap >= 0; tap--) {
+                            append_history_slice(obs_offset, source, tap);
+                        }
+                    } else {
+                        for (const int tap : source.history_taps) {
+                            append_history_slice(obs_offset, source, tap);
+                        }
+                    }
+                    obs_offset += static_cast<size_t>(source.size);
+                }
+            } else {
+                for (int tap = policy.frame_stack - 1; tap >= 0; tap--) {
+                    size_t obs_offset = 0;
+                    for (const ObsSourceSpec& source : policy.obs_layout) {
+                        if (source.history_taps.empty() ||
+                            std::find(source.history_taps.begin(),
+                                      source.history_taps.end(), tap) !=
+                                source.history_taps.end()) {
+                            append_history_slice(obs_offset, source, tap);
+                        }
+                        obs_offset += static_cast<size_t>(source.size);
+                    }
+                }
+            }
+            policy.obs_input_num = static_cast<int>(input_offset);
+        }
         if (!policy.motion_path.empty()) {
             motion_policy_indices_.push_back(static_cast<int>(policies_.size()));
         }
@@ -169,7 +224,6 @@ void InferenceNode::load_config() {
     RCLCPP_INFO(this->get_logger(), "supports_interrupt: %s", has_obs_source("interrupt") ? "true" : "false");
     RCLCPP_INFO(this->get_logger(), "has_motion_policy: %s", motion_policy_indices_.empty() ? "false" : "true");
     RCLCPP_INFO(this->get_logger(), "perception_obs_num: %d", perception_obs_num_);
-    print_vector<std::string>("extra_obs_layouts", extra_obs_layouts);
     RCLCPP_INFO(this->get_logger(), "perception_obs_topic: %s", perception_obs_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "joint_num: %d", joint_num_);
     RCLCPP_INFO(this->get_logger(), "decimation: %d", decimation_);
