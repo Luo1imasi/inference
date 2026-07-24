@@ -452,6 +452,7 @@ void InferenceNode::read_joints_srv(const std::shared_ptr<std_srvs::srv::Trigger
         return;
     }
     try {
+        robot_->read_joints();
         response->success = true;
         response->message = "Joints read successfully";
         publish_joint_states();
@@ -469,6 +470,7 @@ void InferenceNode::read_imu_srv(const std::shared_ptr<std_srvs::srv::Trigger::R
         return;
     }
     try {
+        robot_->read_imu();
         response->success = true;
         response->message = "IMU read successfully";
         publish_imu();
@@ -598,16 +600,16 @@ void InferenceNode::publish_action() {
 }
 
 void InferenceNode::publish_imu() {
-    quat_buffer_ = robot_->get_quat();
-    ang_vel_buffer_ = robot_->get_ang_vel();
+    const auto quat = robot_->get_quat();
+    const auto ang_vel = robot_->get_ang_vel();
     auto msg = sensor_msgs::msg::Imu();
     msg.header.stamp = this->now();
-    msg.orientation.w = quat_buffer_[0];
-    msg.orientation.x = quat_buffer_[1];
-    msg.orientation.y = quat_buffer_[2];
-    msg.orientation.z = quat_buffer_[3];
-    msg.angular_velocity.x = ang_vel_buffer_[0];
-    msg.angular_velocity.y = ang_vel_buffer_[1];
-    msg.angular_velocity.z = ang_vel_buffer_[2];
+    msg.orientation.w = quat[0];
+    msg.orientation.x = quat[1];
+    msg.orientation.y = quat[2];
+    msg.orientation.z = quat[3];
+    msg.angular_velocity.x = ang_vel[0];
+    msg.angular_velocity.y = ang_vel[1];
+    msg.angular_velocity.z = ang_vel[2];
     imu_publisher_->publish(msg);
 }

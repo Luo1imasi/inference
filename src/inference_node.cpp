@@ -306,6 +306,7 @@ void InferenceNode::inference() {
         try {
             std::unique_lock<std::mutex> mode_lock(mode_mutex_);
             auto& policy = active_policy();
+            robot_->read_imu();
             update_obs_segments(policy.obs_segments, policy.obs_layout);
             publish_imu();
             publish_joint_states();

@@ -119,6 +119,47 @@ void RobotInterface::forward_close_chain() {
     }
 }
 
+void RobotInterface::read_joints() {
+    if (!is_init_.load()) {
+        throw std::runtime_error("Motors not initialized");
+    }
+    std::unique_lock<std::mutex> lock(joint_mutex_);
+    exec_motors_parallel([this](std::shared_ptr<MotorDriver>& motor, int idx) {
+        joint_q_[motor2urdf_[idx]] = motor->get_motor_pos() * robot_cfg_->motor_sign_[idx];
+        joint_vel_[motor2urdf_[idx]] = motor->get_motor_spd() * robot_cfg_->motor_sign_[idx];
+        joint_tau_[motor2urdf_[idx]] = motor->get_motor_current() * robot_cfg_->motor_sign_[idx];
+        if (motor->get_response_count() > offline_threshold_) {
+            throw std::runtime_error(
+                "Motor id " + std::to_string(motors_cfg_->motor_id_[idx]) + " offline");
+        }
+    });
+
+    if (!close_chain_joint_idx_.empty() && ankle_decouple_) {
+        forward_close_chain();
+    }
+}
+
+void RobotInterface::read_imu() {
+    if (!imu_) {
+        throw std::runtime_error("IMU not initialized");
+    }
+
+    std::unique_lock<std::mutex> lock(imu_mutex_);
+    const auto raw_quat = imu_->get_quat();          // w, x, y, z
+    const auto raw_ang_vel = imu_->get_ang_vel();  // in IMU frame
+    Eigen::Quaternionf q_body =
+        Eigen::Quaternionf(raw_quat[0], raw_quat[1], raw_quat[2], raw_quat[3]) * extrinsic_q_inv_;
+    q_body.normalize();
+    Eigen::Map<const Eigen::Vector3f> omega_imu(raw_ang_vel.data());
+    const Eigen::Vector3f omega_body = extrinsic_R_mat_ * omega_imu;
+
+    quat_buf_[0] = q_body.w();
+    quat_buf_[1] = q_body.x();
+    quat_buf_[2] = q_body.y();
+    quat_buf_[3] = q_body.z();
+    Eigen::Map<Eigen::Vector3f>(ang_vel_buf_.data()) = omega_body;
+}
+
 void RobotInterface::apply_action(std::vector<float> p,
                                   std::vector<float> v,
                                   std::vector<float> kp,
@@ -128,18 +169,10 @@ void RobotInterface::apply_action(std::vector<float> p,
         return;
     }
     const bool use_close_chain_tau = !close_chain_joint_idx_.empty() && ankle_decouple_;
+    read_joints();
 
     {
         std::unique_lock<std::mutex> lock(joint_mutex_);
-        exec_motors_parallel([this](std::shared_ptr<MotorDriver>& motor, int idx) {
-            joint_q_[motor2urdf_[idx]] = motor->get_motor_pos() * robot_cfg_->motor_sign_[idx];
-            joint_vel_[motor2urdf_[idx]] = motor->get_motor_spd() * robot_cfg_->motor_sign_[idx];
-            joint_tau_[motor2urdf_[idx]] = motor->get_motor_current() * robot_cfg_->motor_sign_[idx];
-            if (motor->get_response_count() > offline_threshold_) {
-                throw std::runtime_error("Motor id " + std::to_string(motors_cfg_->motor_id_[idx]) + " offline");
-            }
-        });
-
         if (use_close_chain_tau){
             auto kp_cc = [&](size_t i) -> double {
                 return kp.empty() ? robot_cfg_->kp_[robot_cfg_->close_chain_motor_idx_[i]]
@@ -155,8 +188,6 @@ void RobotInterface::apply_action(std::vector<float> p,
             auto tau_ff_cc = [&](size_t i) -> double {
                 return tau.empty() ? 0.0 : static_cast<double>(tau[close_chain_joint_idx_[i]]);
             };
-
-            forward_close_chain();
 
             Eigen::VectorXd q(2), vel(2), tau_cc(2);
             for (size_t pair = 0; pair < 2; ++pair) {
@@ -239,24 +270,11 @@ void RobotInterface::reset_joints(std::vector<double> joint_default_angle) {
 }
 
 void RobotInterface::refresh_joints() {
-    {
-        std::unique_lock<std::mutex> lock(joint_mutex_);
-        exec_motors_parallel([this](std::shared_ptr<MotorDriver>& motor, int idx) {
-            motor->refresh_motor_status();
-        });
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
-        exec_motors_parallel([this](std::shared_ptr<MotorDriver>& motor, int idx) {
-            joint_q_[motor2urdf_[idx]] = motor->get_motor_pos() * robot_cfg_->motor_sign_[idx];
-            joint_vel_[motor2urdf_[idx]] = motor->get_motor_spd() * robot_cfg_->motor_sign_[idx];
-            joint_tau_[motor2urdf_[idx]] = motor->get_motor_current() * robot_cfg_->motor_sign_[idx];
-        });
-
-        if (!close_chain_joint_idx_.empty() && ankle_decouple_) {
-            forward_close_chain();
-        }
-    }
+    exec_motors_parallel([this](std::shared_ptr<MotorDriver>& motor, int idx) {
+        motor->refresh_motor_status();
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    read_joints();
 }
 
 void RobotInterface::set_zeros() {

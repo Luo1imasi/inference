@@ -21,6 +21,8 @@ PYBIND11_MODULE(robot_py, m) {
         .def("reset_joints", &RobotInterface::reset_joints, py::arg("joint_default_angle"))
         .def("set_zeros", &RobotInterface::set_zeros)
         .def("clear_errors", &RobotInterface::clear_errors)
+        .def("read_joints", &RobotInterface::read_joints)
+        .def("read_imu", &RobotInterface::read_imu)
         .def("refresh_joints", &RobotInterface::refresh_joints)
         .def("get_joint_q", &RobotInterface::get_joint_q)
         .def("get_joint_vel", &RobotInterface::get_joint_vel)
