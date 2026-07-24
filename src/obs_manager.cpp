@@ -57,9 +57,9 @@ std::vector<int> parse_history_taps(const std::string& taps_spec,
         const std::string tap_text = trim_copy(
             taps_spec.substr(start, end == std::string::npos ? std::string::npos : end - start));
         const int tap = parse_decimal_integer(tap_text, 0, error_message);
-        if (!taps.empty() && taps.back() <= tap) {
+        if (std::find(taps.begin(), taps.end(), tap) != taps.end()) {
             throw std::runtime_error(
-                layout_name + " history taps must be strictly descending: " + raw_spec);
+                layout_name + " history taps must not contain duplicates: " + raw_spec);
         }
         taps.push_back(tap);
 

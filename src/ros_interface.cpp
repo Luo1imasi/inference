@@ -150,12 +150,25 @@ void InferenceNode::load_config() {
             }
             if (!source.history_taps.empty()) {
                 has_sparse_history = true;
-                if (source.history_taps.front() >= policy.frame_stack) {
+                const auto invalid_tap = std::find_if(
+                    source.history_taps.begin(), source.history_taps.end(),
+                    [&policy](int tap) { return tap >= policy.frame_stack; });
+                if (invalid_tap != source.history_taps.end()) {
                     throw std::runtime_error(
                         "obs_layouts[" + std::to_string(i) + "] history tap " +
-                        std::to_string(source.history_taps.front()) + " for source '" +
+                        std::to_string(*invalid_tap) + " for source '" +
                         source.name + "' must be smaller than frame_stacks[" +
                         std::to_string(i) + "]");
+                }
+                if (policy.stack_order == ObsStackOrder::FrameMajor &&
+                    std::adjacent_find(
+                        source.history_taps.begin(), source.history_taps.end(),
+                        [](int previous, int next) { return previous <= next; }) !=
+                        source.history_taps.end()) {
+                    throw std::runtime_error(
+                        "obs_layouts[" + std::to_string(i) +
+                        "] history taps for source '" + source.name +
+                        "' must be strictly descending for frame_major");
                 }
             }
         }
