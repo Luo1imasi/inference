@@ -233,7 +233,7 @@ class InferenceNode : public rclcpp::Node {
     std::vector<int> motion_policy_indices_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_joints_service_, set_zeros_service_, clear_errors_service_, refresh_joints_service_, read_joints_service_, read_imu_service_, init_motors_service_, deinit_motors_service_, start_inference_service_, stop_inference_service_;
 
-    std::mutex act_mutex_, perception_mutex_, interrupt_mutex_, cmd_mutex_, mode_mutex_, lb_switch_mutex_;
+    std::mutex act_mutex_, perception_mutex_, interrupt_mutex_, cmd_mutex_, mode_mutex_, control_mutex_, lb_switch_mutex_;
     std::vector<float> act_, last_act_, cmd_vel_, interrupt_action_, perception_obs_buffer_;
     std::vector<float> joint_pos_buffer_, joint_vel_buffer_, joint_torques_buffer_, quat_buffer_, ang_vel_buffer_;
     sensor_msgs::msg::JointState joint_state_msg_, action_msg_;

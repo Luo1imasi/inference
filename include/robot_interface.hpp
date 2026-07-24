@@ -24,7 +24,9 @@ class RobotInterface {
    public:
     RobotInterface(const std::string& config_file);
     ~RobotInterface() {
-        deinit_motors();
+        if (is_init_.load()) {
+            deinit_motors();
+        }
         motors_.clear();
         imu_.reset();
     }
@@ -60,35 +62,35 @@ class RobotInterface {
     void refresh_joints();
     std::vector<float> get_joint_q() {
         if (!is_init_.load()) {
-            throw std::runtime_error("Motors not initialized");
+            throw std::runtime_error("Motors are not initialized");
         }
         std::unique_lock<std::mutex> lock(joint_mutex_);
         return joint_q_;
     }
     std::vector<float> get_joint_vel() {
         if (!is_init_.load()) {
-            throw std::runtime_error("Motors not initialized");
+            throw std::runtime_error("Motors are not initialized");
         }
         std::unique_lock<std::mutex> lock(joint_mutex_);
         return joint_vel_;
     }
     std::vector<float> get_joint_tau() {
         if (!is_init_.load()) {
-            throw std::runtime_error("Motors not initialized");
+            throw std::runtime_error("Motors are not initialized");
         }
         std::unique_lock<std::mutex> lock(joint_mutex_);
         return joint_tau_;
     }
     std::vector<float> get_quat() {
         if (!imu_) {
-            throw std::runtime_error("IMU not initialized");
+            throw std::runtime_error("IMU is not initialized");
         }
         std::unique_lock<std::mutex> lock(imu_mutex_);
         return quat_buf_;
     }
     std::vector<float> get_ang_vel() {
         if (!imu_) {
-            throw std::runtime_error("IMU not initialized");
+            throw std::runtime_error("IMU is not initialized");
         }
         std::unique_lock<std::mutex> lock(imu_mutex_);
         return ang_vel_buf_;
@@ -112,7 +114,7 @@ class RobotInterface {
     std::vector<float> cached_ankle_action_;
     std::vector<float> last_ankle_joint_target_;
 
-    std::mutex motors_mutex_, joint_mutex_, imu_mutex_;
+    std::mutex command_mutex_, motors_mutex_, joint_mutex_, imu_mutex_;
     std::vector<float> joint_q_, joint_vel_, joint_tau_;
     std::vector<float> motor_pos_target_, motor_vel_target_, motor_kp_target_, motor_kd_target_, motor_tau_target_;
     std::vector<int> close_chain_joint_idx_, motor2urdf_;

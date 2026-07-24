@@ -283,16 +283,20 @@ void InferenceNode::subs_joy_callback(const std::shared_ptr<sensor_msgs::msg::Jo
         }
     }
     if ((msg->buttons[2] == 1 && msg->buttons[2] != last_button0_)) {
-        if(is_running_.load()){
+        if (is_running_.load()){
             reset_runtime_state();
             RCLCPP_INFO(this->get_logger(), "Inference paused");
         }
-        if (robot_->is_init_.load()){
-            robot_->deinit_motors();
-            RCLCPP_INFO(this->get_logger(), "Motors deinitialized");
-        } else {
-            robot_->init_motors();
-            RCLCPP_INFO(this->get_logger(), "Motors initialized");
+        try {
+            if (robot_->is_init_.load()){
+                robot_->deinit_motors();
+                RCLCPP_INFO(this->get_logger(), "Motors deinitialized");
+            } else {
+                robot_->init_motors();
+                RCLCPP_INFO(this->get_logger(), "Motors initialized");
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(this->get_logger(), "Failed to change motor state: %s", e.what());
         }
     }
     if (msg->buttons[0] == 1 && msg->buttons[0] != last_button1_) {
@@ -300,16 +304,23 @@ void InferenceNode::subs_joy_callback(const std::shared_ptr<sensor_msgs::msg::Jo
             reset_runtime_state();
             RCLCPP_INFO(this->get_logger(), "Inference paused");
         }
-        if (!robot_->is_init_.load()){
-            RCLCPP_INFO(this->get_logger(), "Motors are not initialized!");
-        } else {
+        try {
             robot_->reset_joints(joint_default_angle_);
             RCLCPP_INFO(this->get_logger(), "Motors reset");
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(this->get_logger(), "Failed to reset motors: %s", e.what());
         }
     }
     if (msg->buttons[1] == 1 && msg->buttons[1] != last_button2_) {
-        is_running_.store(!is_running_.load());
-        RCLCPP_INFO(this->get_logger(), "Inference %s", is_running_.load() ? "started" : "paused");
+        if (is_running_.load()) {
+            is_running_.store(false);
+            RCLCPP_INFO(this->get_logger(), "Inference paused");
+        } else if (!robot_->is_init_.load()) {
+            RCLCPP_WARN(this->get_logger(), "Motors are not initialized, cannot start inference");
+        } else {
+            is_running_.store(true);
+            RCLCPP_INFO(this->get_logger(), "Inference started");
+        }
     }
     if (msg->buttons[3] == 1 && msg->buttons[3] != last_button3_) {
         is_joy_control_.store(!is_joy_control_);
@@ -407,17 +418,11 @@ void InferenceNode::subs_joint_state_callback(const std::shared_ptr<sensor_msgs:
 
 void InferenceNode::reset_joints_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                      std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    if (is_running_.load()) {
-        response->success = false;
-        response->message = "Inference is running, cannot reset joints.";
-        return;
-    }
-    if (!robot_->is_init_.load()) {
-        response->success = false;
-        response->message = "Motors are not initialized, cannot reset joints.";
-        return;
-    }
     try {
+        if (is_running_.load()){
+            reset_runtime_state();
+            RCLCPP_INFO(this->get_logger(), "Inference paused");
+        }
         robot_->reset_joints(joint_default_angle_);
         response->success = true;
         response->message = "Joints reset successfully";
@@ -429,15 +434,10 @@ void InferenceNode::reset_joints_srv(const std::shared_ptr<std_srvs::srv::Trigge
 
 void InferenceNode::refresh_joints_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                      std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    if (!robot_->is_init_.load()) {
-        response->success = false;
-        response->message = "Motors are not initialized, cannot refresh motors.";
-        return;
-    }
     try {
         robot_->refresh_joints();
         response->success = true;
-        response->message = "Motors refresh successfully";
+        response->message = "Motors refreshed successfully";
     } catch (const std::exception& e) {
         response->success = false;
         response->message = e.what();
@@ -446,11 +446,6 @@ void InferenceNode::refresh_joints_srv(const std::shared_ptr<std_srvs::srv::Trig
 
 void InferenceNode::read_joints_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                      std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    if (!robot_->is_init_.load()) {
-        response->success = false;
-        response->message = "Motors are not initialized, cannot read joints.";
-        return;
-    }
     try {
         robot_->read_joints();
         response->success = true;
@@ -464,11 +459,6 @@ void InferenceNode::read_joints_srv(const std::shared_ptr<std_srvs::srv::Trigger
 
 void InferenceNode::read_imu_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                  std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    if (!robot_) {
-        response->success = false;
-        response->message = "IMU is not initialized, cannot read IMU.";
-        return;
-    }
     try {
         robot_->read_imu();
         response->success = true;
@@ -482,14 +472,9 @@ void InferenceNode::read_imu_srv(const std::shared_ptr<std_srvs::srv::Trigger::R
 
 void InferenceNode::set_zeros_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                   std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    if (!robot_->is_init_.load()) {
-        response->success = false;
-        response->message = "Motors are not initialized, cannot set zeros.";
-        return;
-    }
     if (is_running_.load()) {
         response->success = false;
-        response->message = "Inference is running, cannot set zeros.";
+        response->message = "Inference is running, cannot set zeros";
         return;
     }
     try {
@@ -504,11 +489,6 @@ void InferenceNode::set_zeros_srv(const std::shared_ptr<std_srvs::srv::Trigger::
 
 void InferenceNode::clear_errors_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                      std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    if (!robot_) {
-        response->success = false;
-        response->message = "Robot interface is not initialized, cannot clear errors.";
-        return;
-    }
     try {
         robot_->clear_errors();
         response->success = true;
@@ -521,11 +501,6 @@ void InferenceNode::clear_errors_srv(const std::shared_ptr<std_srvs::srv::Trigge
 
 void InferenceNode::init_motors_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                     std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    if (robot_->is_init_.load()) {
-        response->success = false;
-        response->message = "Motors are already initialized, cannot init motors.";
-        return;
-    }
     try {
         robot_->init_motors();
         response->success = true;
@@ -538,12 +513,11 @@ void InferenceNode::init_motors_srv(const std::shared_ptr<std_srvs::srv::Trigger
 
 void InferenceNode::deinit_motors_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                       std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    if (!robot_->is_init_.load()) {
-        response->success = false;
-        response->message = "Motors are not initialized, cannot deinit motors.";
-        return;
-    }
     try {
+        if (is_running_.load()){
+            reset_runtime_state();
+            RCLCPP_INFO(this->get_logger(), "Inference paused");
+        }
         robot_->deinit_motors();
         response->success = true;
         response->message = "Motors deinitialized successfully";
@@ -557,7 +531,13 @@ void InferenceNode::start_inference_srv(const std::shared_ptr<std_srvs::srv::Tri
                                         std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
     if (is_running_.load()) {
         response->success = false;
-        response->message = "Inference is already running!";
+        response->message = "Inference is already running";
+        return;
+    }
+    if (!robot_->is_init_.load()) {
+        response->success = false;
+        response->message = "Motors are not initialized, cannot start inference";
+        RCLCPP_WARN(this->get_logger(), "%s", response->message.c_str());
         return;
     }
     is_running_.store(true);
@@ -569,7 +549,7 @@ void InferenceNode::stop_inference_srv(const std::shared_ptr<std_srvs::srv::Trig
                                        std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
     if (!is_running_.load()) {
         response->success = false;
-        response->message = "Inference is already stopped!";
+        response->message = "Inference is already stopped";
         return;
     }
     is_running_.store(false);

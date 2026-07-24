@@ -121,7 +121,7 @@ void RobotInterface::forward_close_chain() {
 
 void RobotInterface::read_joints() {
     if (!is_init_.load()) {
-        throw std::runtime_error("Motors not initialized");
+        throw std::runtime_error("Motors are not initialized");
     }
     std::unique_lock<std::mutex> lock(joint_mutex_);
     exec_motors_parallel([this](std::shared_ptr<MotorDriver>& motor, int idx) {
@@ -141,7 +141,7 @@ void RobotInterface::read_joints() {
 
 void RobotInterface::read_imu() {
     if (!imu_) {
-        throw std::runtime_error("IMU not initialized");
+        throw std::runtime_error("IMU is not initialized");
     }
 
     std::unique_lock<std::mutex> lock(imu_mutex_);
@@ -165,6 +165,7 @@ void RobotInterface::apply_action(std::vector<float> p,
                                   std::vector<float> kp,
                                   std::vector<float> kd,
                                   std::vector<float> tau) {
+    std::unique_lock<std::mutex> command_lock(command_mutex_);
     if(!is_init_.load()){
         return;
     }
@@ -234,32 +235,61 @@ void RobotInterface::apply_action(std::vector<float> p,
 }
 
 void RobotInterface::reset_joints(std::vector<double> joint_default_angle) {
-    if (!close_chain_joint_idx_.empty() && ankle_decouple_){
-        Eigen::VectorXd q(2), vel(2), tau(2);
-        for (size_t pair = 0; pair < 2; ++pair) {
-            const bool left = (pair == 0);
-            int idx1 = close_chain_joint_idx_[pair * 2];
-            int idx2 = close_chain_joint_idx_[pair * 2 + 1];
-            q << joint_default_angle[idx1], joint_default_angle[idx2];
-            ankle_decouple_->get_decoupleQVT(q, vel, tau, left);
-            joint_default_angle[idx1] = q[0];
-            joint_default_angle[idx2] = q[1];
+    std::unique_lock<std::mutex> command_lock(command_mutex_);
+
+    constexpr int reset_duration_ms = 4000;
+    constexpr int reset_period_ms = 20;
+    constexpr int reset_steps = reset_duration_ms / reset_period_ms;
+    const auto reset_period = std::chrono::milliseconds(reset_period_ms);
+
+    refresh_joints();
+    const std::vector<float> start_joint_q = get_joint_q();
+    auto next_frame = std::chrono::steady_clock::now();
+
+    for (int step = 0; step <= reset_steps; ++step) {
+        if (step > 0) {
+            read_joints();
+        }
+
+        const double phase = static_cast<double>(step) / reset_steps;
+        const double blend = phase * phase * (3.0 - 2.0 * phase);
+        std::vector<double> joint_target(joint_default_angle.size());
+        for (size_t i = 0; i < joint_target.size(); ++i) {
+            joint_target[i] = start_joint_q[i] +
+                              blend * (joint_default_angle[i] - start_joint_q[i]);
+        }
+
+        if (!close_chain_joint_idx_.empty() && ankle_decouple_) {
+            Eigen::VectorXd q(2), vel(2), tau(2);
+            for (size_t pair = 0; pair < 2; ++pair) {
+                const bool left = (pair == 0);
+                int idx1 = close_chain_joint_idx_[pair * 2];
+                int idx2 = close_chain_joint_idx_[pair * 2 + 1];
+                q << joint_target[idx1], joint_target[idx2];
+                ankle_decouple_->get_decoupleQVT(q, vel, tau, left);
+                joint_target[idx1] = q[0];
+                joint_target[idx2] = q[1];
+            }
+        }
+
+        {
+            std::unique_lock<std::mutex> lock(motors_mutex_);
+            for (size_t i = 0; i < motor_pos_target_.size(); i++){
+                motor_pos_target_[i] = static_cast<float>(joint_target[motor2urdf_[i]]);
+                motor_vel_target_[i] = 0.0f;
+                motor_kp_target_[i]  = static_cast<float>(robot_cfg_->kp_[i]) * (1.0f / 2.5f);
+                motor_kd_target_[i]  = static_cast<float>(robot_cfg_->kd_[i]);
+                motor_tau_target_[i] = 0.0f;
+            }
+        }
+
+        motors_mit_cmd();
+        if (step < reset_steps) {
+            next_frame += reset_period;
+            std::this_thread::sleep_until(next_frame);
         }
     }
 
-    {
-        std::unique_lock<std::mutex> lock(motors_mutex_);
-        for (size_t i = 0; i < motor_pos_target_.size(); i++){
-            motor_pos_target_[i] = static_cast<float>(joint_default_angle[motor2urdf_[i]]);
-            motor_vel_target_[i] = 0.0f;
-            motor_kp_target_[i]  = static_cast<float>(robot_cfg_->kp_[i]) * (1.0f / 2.5f);
-            motor_kd_target_[i]  = static_cast<float>(robot_cfg_->kd_[i]);
-            motor_tau_target_[i] = 0.0f;
-        }
-    }
-
-    motors_mit_cmd();
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     {
         std::unique_lock<std::mutex> lock(motors_mutex_);
         for (size_t i = 0; i < motor_kp_target_.size(); i++){
@@ -270,6 +300,9 @@ void RobotInterface::reset_joints(std::vector<double> joint_default_angle) {
 }
 
 void RobotInterface::refresh_joints() {
+    if (!is_init_.load()) {
+        throw std::runtime_error("Motors are not initialized");
+    }
     exec_motors_parallel([this](std::shared_ptr<MotorDriver>& motor, int idx) {
         motor->refresh_motor_status();
     });
@@ -278,18 +311,27 @@ void RobotInterface::refresh_joints() {
 }
 
 void RobotInterface::set_zeros() {
+    std::unique_lock<std::mutex> command_lock(command_mutex_);
+    if (!is_init_.load()) {
+        throw std::runtime_error("Motors are not initialized");
+    }
     exec_motors_parallel([](std::shared_ptr<MotorDriver>& motor, int idx) {
         motor->set_motor_zero();
     });
 }
 
 void RobotInterface::clear_errors() {
+    std::unique_lock<std::mutex> command_lock(command_mutex_);
     exec_motors_parallel([](std::shared_ptr<MotorDriver>& motor, int idx) {
         motor->clear_motor_error();
     });
 }
 
 void RobotInterface::init_motors() {
+    std::unique_lock<std::mutex> command_lock(command_mutex_);
+    if (is_init_.load()) {
+        throw std::runtime_error("Motors are already initialized");
+    }
     exec_motors_parallel([](std::shared_ptr<MotorDriver>& motor, int idx) {
         motor->init_motor();
     });
@@ -297,6 +339,10 @@ void RobotInterface::init_motors() {
 }
 
 void RobotInterface::deinit_motors() {
+    std::unique_lock<std::mutex> command_lock(command_mutex_);
+    if (!is_init_.load()) {
+        throw std::runtime_error("Motors are already deinitialized");
+    }
     exec_motors_parallel([](std::shared_ptr<MotorDriver>& motor, int idx) {
         motor->deinit_motor();
     });

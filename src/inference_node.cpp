@@ -138,6 +138,8 @@ void InferenceNode::setup_model(std::unique_ptr<ModelContext>& ctx, std::string 
 
 void InferenceNode::reset_runtime_state() {
     is_running_.store(false);
+    std::unique_lock<std::mutex> mode_lock(mode_mutex_);
+    std::unique_lock<std::mutex> control_lock(control_mutex_);
     is_interrupt_.store(false);
     is_motion_policy_.store(false);
     active_policy_idx_ = 0;
@@ -247,7 +249,8 @@ void InferenceNode::reset_policy_runtime(PolicyRuntime& policy) {
 }
 
 void InferenceNode::apply_action() {
-    if(!is_running_.load() || !robot_->is_init_.load()){
+    std::unique_lock<std::mutex> control_lock(control_mutex_);
+    if(!is_running_.load()){
         return;
     }
     {
@@ -305,6 +308,9 @@ void InferenceNode::inference() {
 
         try {
             std::unique_lock<std::mutex> mode_lock(mode_mutex_);
+            if (!is_running_.load()) {
+                continue;
+            }
             auto& policy = active_policy();
             robot_->read_imu();
             update_obs_segments(policy.obs_segments, policy.obs_layout);
