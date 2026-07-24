@@ -216,8 +216,8 @@ class InferenceNode : public rclcpp::Node {
     float dt_;
     float obs_scales_lin_vel_, obs_scales_ang_vel_, obs_scales_dof_pos_, obs_scales_dof_vel_,
         obs_scales_gravity_b_, clip_observations_;
-    float action_scale_, clip_actions_;
-    std::vector<double> clip_cmd_, joint_default_angle_, joint_limits_;
+    float clip_actions_;
+    std::vector<double> action_scale_, clip_cmd_, joint_default_angle_, joint_limits_;
     std::vector<long int> usd2urdf_;
     float gravity_z_upper_;
     int last_button0_ = 0, last_button1_ = 0, last_button2_ = 0, last_button3_ = 0, last_button4_ = 0, last_button5_ = 0;
