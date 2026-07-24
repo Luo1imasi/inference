@@ -17,6 +17,7 @@ add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -68,7 +69,7 @@ target_include_directories(inference_node
   ${CNPY_INCLUDE_DIR}
 )
 target_link_libraries(inference_node PUBLIC ${PUBLIC_DEPENDENCIES} utils cnpy robot)
-ament_target_dependencies(inference_node PUBLIC rclcpp sensor_msgs geometry_msgs std_srvs)
+ament_target_dependencies(inference_node PUBLIC rclcpp std_msgs sensor_msgs geometry_msgs std_srvs)
 
 set_target_properties(inference_node PROPERTIES LINK_FLAGS "-Wl,--no-as-needed")
 
@@ -94,7 +95,7 @@ install(TARGETS robot_py
   ARCHIVE DESTINATION ${PYTHON_INSTALL_DIR}
   RUNTIME DESTINATION ${PYTHON_INSTALL_DIR})
 
-ament_export_dependencies(rclcpp sensor_msgs geometry_msgs)
+ament_export_dependencies(rclcpp std_msgs sensor_msgs geometry_msgs)
 ament_export_libraries(robot)
 
 ament_package()

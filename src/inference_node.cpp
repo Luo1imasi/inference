@@ -169,6 +169,18 @@ void InferenceNode::reset_runtime_state() {
     for (PolicyRuntime& policy : policies_) {
         reset_policy_runtime(policy);
     }
+    request_depth_history_reset();
+}
+
+void InferenceNode::request_depth_history_reset() {
+    if (!use_depth_ || !clear_depth_history_client_) {
+        return;
+    }
+    if (!clear_depth_history_client_->service_is_ready()) {
+        return;
+    }
+    auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
+    clear_depth_history_client_->async_send_request(request);
 }
 
 InferenceNode::PolicyRuntime& InferenceNode::active_policy() {

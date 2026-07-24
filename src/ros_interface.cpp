@@ -20,6 +20,8 @@ void InferenceNode::load_config() {
     this->declare_parameter<float>("act_alpha", 0.9);
     this->declare_parameter<int>("intra_threads", -1);
     this->declare_parameter<std::string>("perception_obs_topic", "elevation_data");
+    this->declare_parameter<std::string>("depth_obs_topic", "/depth_obs");
+    this->declare_parameter<bool>("use_depth", false);
     this->declare_parameter<int>("joint_num", 23);
     this->declare_parameter<int>("decimation", 10);
     this->declare_parameter<float>("dt", 0.001);
@@ -58,6 +60,8 @@ void InferenceNode::load_config() {
     this->get_parameter("act_alpha", act_alpha_);
     this->get_parameter("intra_threads", intra_threads_);
     this->get_parameter("perception_obs_topic", perception_obs_topic_);
+    this->get_parameter("depth_obs_topic", depth_obs_topic_);
+    this->get_parameter("use_depth", use_depth_);
     this->get_parameter("joint_num", joint_num_);
     this->get_parameter("decimation", decimation_);
     this->get_parameter("dt", dt_);
@@ -249,6 +253,8 @@ void InferenceNode::load_config() {
     RCLCPP_INFO(this->get_logger(), "has_motion_policy: %s", motion_policy_indices_.empty() ? "false" : "true");
     RCLCPP_INFO(this->get_logger(), "perception_obs_num: %d", perception_obs_num_);
     RCLCPP_INFO(this->get_logger(), "perception_obs_topic: %s", perception_obs_topic_.c_str());
+    RCLCPP_INFO(this->get_logger(), "use_depth: %s", use_depth_ ? "true" : "false");
+    RCLCPP_INFO(this->get_logger(), "depth_obs_topic: %s", depth_obs_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "joint_num: %d", joint_num_);
     RCLCPP_INFO(this->get_logger(), "decimation: %d", decimation_);
     RCLCPP_INFO(this->get_logger(), "dt: %f", dt_);
