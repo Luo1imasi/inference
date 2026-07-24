@@ -1,0 +1,16 @@
+# RealSense D435i parameters for rs_launch.py (config_file)
+# Depth topic: /camera/camera/depth/image_rect_raw (must match depth_topic in parkour.yaml)
+
+camera_namespace: "camera"
+camera_name: "camera"
+enable_depth: true
+enable_color: false
+publish_tf: false
+enable_gyro: false
+enable_accel: false
+depth_module.depth_profile: "480x270x60"
+depth_module.depth_format: "Z16"
+depth_module.enable_auto_exposure: true
+log_level: "info"
+output: "screen"
+spatial_filter.enable: false

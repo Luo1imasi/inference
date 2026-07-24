@@ -141,9 +141,17 @@ class InferenceNode : public rclcpp::Node {
         cmd_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_vel", data_qos, std::bind(&InferenceNode::subs_cmd_callback,this, std::placeholders::_1
         ));
-        elevation_subscription_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
-            perception_obs_topic_, data_qos,
-            std::bind(&InferenceNode::subs_elevation_callback, this, std::placeholders::_1));
+        if (has_obs_source("perception")) {
+            const std::string& perception_topic =
+                use_depth_ ? depth_obs_topic_ : perception_obs_topic_;
+            elevation_subscription_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
+                perception_topic, data_qos,
+                std::bind(&InferenceNode::subs_elevation_callback, this, std::placeholders::_1));
+        }
+        if (use_depth_) {
+            clear_depth_history_client_ =
+                this->create_client<std_srvs::srv::Trigger>("clear_depth_history");
+        }
         joint_state_subscription_ = this->create_subscription<sensor_msgs::msg::JointState>(
             "/joint_ref_states", data_qos,
             std::bind(&InferenceNode::subs_joint_state_callback, this, std::placeholders::_1));
@@ -196,9 +204,11 @@ class InferenceNode : public rclcpp::Node {
     std::atomic<bool> is_running_{false}, is_joy_control_{true}, is_interrupt_{false}, is_motion_policy_{false};
     std::string robot_config_path_;
     std::string perception_obs_topic_;
+    std::string depth_obs_topic_;
     size_t current_motion_policy_idx_ = 0;
     int active_policy_idx_ = 0;
     int perception_obs_num_, joint_num_;
+    bool use_depth_ = false;
     int decimation_;
     std::unique_ptr<Ort::Env> env_;
     int intra_threads_;
@@ -210,6 +220,7 @@ class InferenceNode : public rclcpp::Node {
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr action_publisher_;
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_publisher_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr clear_depth_history_client_;
     std::thread inference_thread_;
     std::thread control_thread_;
     float act_alpha_;
@@ -246,6 +257,7 @@ class InferenceNode : public rclcpp::Node {
     // Policy/model runtime helpers.
     void initialize_runtime_state();
     void reset_runtime_state();
+    void request_depth_history_reset();
     void reset_policy_runtime(PolicyRuntime& policy);
     void step_motion_frame();
 

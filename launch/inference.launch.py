@@ -12,6 +12,19 @@ import re
 
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
+
+def policy_uses_depth(policy_config_path: str) -> bool:
+    """Detect use_depth: true in policy yaml without requiring PyYAML."""
+    try:
+        with open(policy_config_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if re.match(r"^\s*use_depth:\s*true\s*(#.*)?$", line):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
 def launch_setup(context, *args, **kwargs):
     robot = LaunchConfiguration("robot").perform(context)
     policy = LaunchConfiguration("policy").perform(context)
@@ -29,13 +42,15 @@ def launch_setup(context, *args, **kwargs):
     )
     robot_config = os.path.join(robot_dir, "robot.yaml")
     policy_config = os.path.join(robot_dir, "configs", policy_file)
+    model_dir = os.path.join(robot_dir, "models")
+    motion_dir = os.path.join(robot_dir, "motions")
 
     if not os.path.isfile(robot_config):
         raise FileNotFoundError(f"Robot config not found: {robot_config}")
     if not os.path.isfile(policy_config):
         raise FileNotFoundError(f"Inference config not found: {policy_config}")
 
-    return [
+    nodes = [
         Node(
             package="roboparty_inference",
             executable="inference_node",
@@ -46,14 +61,30 @@ def launch_setup(context, *args, **kwargs):
                     "robot_name": robot,
                     "policy_name": policy,
                     "robot_config": robot_config,
-                    "model_dir": os.path.join(robot_dir, "models"),
-                    "motion_dir": os.path.join(robot_dir, "motions"),
+                    "model_dir": model_dir,
+                    "motion_dir": motion_dir,
                 },
             ],
             output="screen",
-            # prefix=["xterm -e gdb -ex run --args"],
         ),
     ]
+
+    if policy_uses_depth(policy_config):
+        nodes.insert(
+            0,
+            Node(
+                package="roboparty_inference",
+                executable="depth_node",
+                name="depth_node",
+                parameters=[
+                    policy_config,
+                    {"model_dir": model_dir},
+                ],
+                output="screen",
+            ),
+        )
+
+    return nodes
 
 
 def generate_launch_description():

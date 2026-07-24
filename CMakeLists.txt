@@ -17,6 +17,7 @@ add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -28,6 +29,7 @@ find_package(roboparty_motors REQUIRED)
 find_package(roboparty_imu REQUIRED)
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 find_package(pybind11 REQUIRED)
+find_package(OpenCV REQUIRED)
 
 option(YAML_BUILD_SHARED_LIBS "Build shared library" OFF)
 option(YAML_CPP_BUILD_TESTS "Build tests" OFF)
@@ -66,13 +68,27 @@ target_include_directories(inference_node
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   ${ONNXRUNTIME_INCLUDE_DIR}
   ${CNPY_INCLUDE_DIR}
+  ${OpenCV_INCLUDE_DIRS}
 )
-target_link_libraries(inference_node PUBLIC ${PUBLIC_DEPENDENCIES} utils cnpy robot)
-ament_target_dependencies(inference_node PUBLIC rclcpp sensor_msgs geometry_msgs std_srvs)
+target_link_libraries(inference_node PUBLIC ${PUBLIC_DEPENDENCIES} ${OpenCV_LIBS} utils cnpy robot)
+ament_target_dependencies(inference_node PUBLIC rclcpp std_msgs sensor_msgs geometry_msgs std_srvs)
 
 set_target_properties(inference_node PROPERTIES LINK_FLAGS "-Wl,--no-as-needed")
 
-install(TARGETS inference_node
+add_executable(depth_node src/depth_node.cpp src/depth_provider.cpp)
+target_include_directories(depth_node
+  PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+  $<INSTALL_INTERFACE:include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  ${ONNXRUNTIME_INCLUDE_DIR}
+  ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(depth_node PUBLIC ${PUBLIC_DEPENDENCIES} ${OpenCV_LIBS})
+ament_target_dependencies(depth_node PUBLIC rclcpp std_msgs sensor_msgs std_srvs)
+set_target_properties(depth_node PROPERTIES LINK_FLAGS "-Wl,--no-as-needed")
+
+install(TARGETS inference_node depth_node
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 
 install(TARGETS robot utils
@@ -94,7 +110,7 @@ install(TARGETS robot_py
   ARCHIVE DESTINATION ${PYTHON_INSTALL_DIR}
   RUNTIME DESTINATION ${PYTHON_INSTALL_DIR})
 
-ament_export_dependencies(rclcpp sensor_msgs geometry_msgs)
+ament_export_dependencies(rclcpp std_msgs sensor_msgs geometry_msgs)
 ament_export_libraries(robot)
 
 ament_package()
