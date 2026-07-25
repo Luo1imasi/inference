@@ -141,9 +141,15 @@ class InferenceNode : public rclcpp::Node {
         cmd_subscription_ = this->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_vel", data_qos, std::bind(&InferenceNode::subs_cmd_callback,this, std::placeholders::_1
         ));
-        elevation_subscription_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
-            perception_obs_topic_, data_qos,
-            std::bind(&InferenceNode::subs_elevation_callback, this, std::placeholders::_1));
+        if (has_obs_source("perception")) {
+            perception_subscription_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
+                perception_obs_topic_, data_qos,
+                std::bind(&InferenceNode::subs_perception_callback, this, std::placeholders::_1));
+        }
+        if (use_depth_) {
+            clear_depth_history_client_ =
+                this->create_client<std_srvs::srv::Trigger>("clear_depth_history");
+        }
         joint_state_subscription_ = this->create_subscription<sensor_msgs::msg::JointState>(
             "/joint_ref_states", data_qos,
             std::bind(&InferenceNode::subs_joint_state_callback, this, std::placeholders::_1));
@@ -199,17 +205,19 @@ class InferenceNode : public rclcpp::Node {
     size_t current_motion_policy_idx_ = 0;
     int active_policy_idx_ = 0;
     int perception_obs_num_, joint_num_;
+    bool use_depth_ = false;
     int decimation_;
     std::unique_ptr<Ort::Env> env_;
     int intra_threads_;
     Ort::AllocatorWithDefaultOptions allocator_;
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_subscription_;
-    rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr elevation_subscription_;
+    rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr perception_subscription_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_subscription_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr action_publisher_;
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_publisher_;
+    rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr clear_depth_history_client_;
     std::thread inference_thread_;
     std::thread control_thread_;
     float act_alpha_;
@@ -232,7 +240,7 @@ class InferenceNode : public rclcpp::Node {
 
     void subs_joy_callback(const std::shared_ptr<sensor_msgs::msg::Joy> msg);
     void subs_cmd_callback(const std::shared_ptr<geometry_msgs::msg::Twist> msg);
-    void subs_elevation_callback(const std::shared_ptr<std_msgs::msg::Float32MultiArray> msg);
+    void subs_perception_callback(const std::shared_ptr<std_msgs::msg::Float32MultiArray> msg);
     void subs_joint_state_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg);
     void inference();
     void control();
@@ -246,6 +254,7 @@ class InferenceNode : public rclcpp::Node {
     // Policy/model runtime helpers.
     void initialize_runtime_state();
     void reset_runtime_state();
+    void request_depth_history_reset();
     void reset_policy_runtime(PolicyRuntime& policy);
     void step_motion_frame();
 
