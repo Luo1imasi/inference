@@ -142,11 +142,9 @@ class InferenceNode : public rclcpp::Node {
             "/cmd_vel", data_qos, std::bind(&InferenceNode::subs_cmd_callback,this, std::placeholders::_1
         ));
         if (has_obs_source("perception")) {
-            const std::string& perception_topic =
-                use_depth_ ? depth_obs_topic_ : perception_obs_topic_;
-            elevation_subscription_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
-                perception_topic, data_qos,
-                std::bind(&InferenceNode::subs_elevation_callback, this, std::placeholders::_1));
+            perception_subscription_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
+                perception_obs_topic_, data_qos,
+                std::bind(&InferenceNode::subs_perception_callback, this, std::placeholders::_1));
         }
         if (use_depth_) {
             clear_depth_history_client_ =
@@ -204,7 +202,6 @@ class InferenceNode : public rclcpp::Node {
     std::atomic<bool> is_running_{false}, is_joy_control_{true}, is_interrupt_{false}, is_motion_policy_{false};
     std::string robot_config_path_;
     std::string perception_obs_topic_;
-    std::string depth_obs_topic_;
     size_t current_motion_policy_idx_ = 0;
     int active_policy_idx_ = 0;
     int perception_obs_num_, joint_num_;
@@ -215,7 +212,7 @@ class InferenceNode : public rclcpp::Node {
     Ort::AllocatorWithDefaultOptions allocator_;
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscription_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_subscription_;
-    rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr elevation_subscription_;
+    rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr perception_subscription_;
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_subscription_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr action_publisher_;
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_publisher_;
@@ -243,7 +240,7 @@ class InferenceNode : public rclcpp::Node {
 
     void subs_joy_callback(const std::shared_ptr<sensor_msgs::msg::Joy> msg);
     void subs_cmd_callback(const std::shared_ptr<geometry_msgs::msg::Twist> msg);
-    void subs_elevation_callback(const std::shared_ptr<std_msgs::msg::Float32MultiArray> msg);
+    void subs_perception_callback(const std::shared_ptr<std_msgs::msg::Float32MultiArray> msg);
     void subs_joint_state_callback(const std::shared_ptr<sensor_msgs::msg::JointState> msg);
     void inference();
     void control();
