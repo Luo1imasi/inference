@@ -220,13 +220,13 @@ void RobotInterface::apply_action(std::vector<float> p,
                 motor_vel_target_[i] = 0.0f;
                 motor_kp_target_[i]  = 0.0f;
                 motor_kd_target_[i]  = 0.0f;
-                motor_tau_target_[i] = p[ji] * robot_cfg_->motor_sign_[i];
+                motor_tau_target_[i] = p[ji];
             } else {
                 motor_pos_target_[i] = p[ji];
-                motor_vel_target_[i] = v.empty()  ? 0.0f : v[ji] * robot_cfg_->motor_sign_[i];
+                motor_vel_target_[i] = v.empty()  ? 0.0f : v[ji];
                 motor_kp_target_[i]  = kp.empty() ? static_cast<float>(robot_cfg_->kp_[i]) : kp[ji];
                 motor_kd_target_[i]  = kd.empty() ? static_cast<float>(robot_cfg_->kd_[i]) : kd[ji];
-                motor_tau_target_[i] = tau.empty() ? 0.0f : tau[ji] * robot_cfg_->motor_sign_[i];
+                motor_tau_target_[i] = tau.empty() ? 0.0f : tau[ji];
             }
         }
     }
@@ -364,11 +364,12 @@ void RobotInterface::motors_mit_cmd() {
                     const long int motor_id = motors_cfg_->motor_id_[idx];
                     const size_t slot = (motor_id > 0 && motor_id <= 8) ? static_cast<size_t>(motor_id - 1) : j;
                     if (slot >= 8) continue;
-                    pos[slot] = motor_pos_target_[idx] * robot_cfg_->motor_sign_[idx];
-                    vel[slot] = motor_vel_target_[idx];
+                    const float sign = static_cast<float>(robot_cfg_->motor_sign_[idx]);
+                    pos[slot] = motor_pos_target_[idx] * sign;
+                    vel[slot] = motor_vel_target_[idx] * sign;
                     kp[slot]  = motor_kp_target_[idx];
                     kd[slot]  = motor_kd_target_[idx];
-                    tau[slot] = motor_tau_target_[idx];
+                    tau[slot] = motor_tau_target_[idx] * sign;
                 }
                 motors_[start_count]->motor_mit_cmd(pos, vel, kp, kd, tau);
             });
@@ -376,11 +377,12 @@ void RobotInterface::motors_mit_cmd() {
             tasks.push_back([this, start_count, num_motors]() {
                 for (size_t j = 0; j < num_motors; ++j) {
                     const size_t idx = start_count + j;
-                    motors_[idx]->motor_mit_cmd(motor_pos_target_[idx] * robot_cfg_->motor_sign_[idx],
-                                                 motor_vel_target_[idx],
+                    const float sign = static_cast<float>(robot_cfg_->motor_sign_[idx]);
+                    motors_[idx]->motor_mit_cmd(motor_pos_target_[idx] * sign,
+                                                 motor_vel_target_[idx] * sign,
                                                  motor_kp_target_[idx],
                                                  motor_kd_target_[idx],
-                                                 motor_tau_target_[idx]);
+                                                 motor_tau_target_[idx] * sign);
                 }
             });
         }
