@@ -33,7 +33,8 @@ void InferenceNode::load_config() {
     this->declare_parameter<std::vector<double>>("action_scale", std::vector<double>{0.3});
     this->declare_parameter<float>("clip_actions", 18.0);
     this->declare_parameter<std::vector<long int>>("usd2urdf", std::vector<long int>{});
-    this->declare_parameter<std::vector<double>>("clip_cmd", std::vector<double>{});
+    this->declare_parameter<std::vector<double>>(
+        "clip_cmd", std::vector<double>{-0.4, 0.6, -0.4, 0.4, -0.8, 0.8});
     this->declare_parameter<std::vector<double>>("joint_default_angle", std::vector<double>{});
     this->declare_parameter<std::vector<double>>("joint_limits", std::vector<double>{});
     this->declare_parameter<float>("gravity_z_upper", -0.5);
