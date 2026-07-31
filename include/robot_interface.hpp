@@ -111,8 +111,7 @@ class RobotInterface {
     std::vector<float> ang_vel_buf_{0.f, 0.f, 0.f};
     std::vector<std::shared_ptr<MotorDriver>> motors_;
     std::unique_ptr<ThreadPool> thread_pool_;
-    std::vector<float> cached_ankle_action_;
-    std::vector<float> last_ankle_joint_target_;
+    std::vector<size_t> motor_bus_offsets_;
 
     std::mutex command_mutex_, motors_mutex_, joint_mutex_, imu_mutex_;
     std::vector<float> joint_q_, joint_vel_, joint_tau_;
@@ -122,7 +121,18 @@ class RobotInterface {
     void setup_motors();
     void setup_imu();
 
-    void exec_motors_parallel(const std::function<void(std::shared_ptr<MotorDriver>&, int)>& cmd_func);
+    template <typename F>
+    void exec_motors_parallel(F&& cmd_func) {
+        std::unique_lock<std::mutex> lock(motors_mutex_);
+        thread_pool_->run_parallel(motor_bus_offsets_.size() - 1,
+            [this, &cmd_func](size_t bus) {
+                for (size_t idx = motor_bus_offsets_[bus];
+                     idx < motor_bus_offsets_[bus + 1]; ++idx) {
+                    cmd_func(motors_[idx], static_cast<int>(idx));
+                }
+            });
+    }
+    void throw_if_motors_offline() const;
     void motors_mit_cmd();
     void forward_close_chain();
 };
