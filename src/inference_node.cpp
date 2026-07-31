@@ -264,15 +264,16 @@ void InferenceNode::apply_action() {
 
 void InferenceNode::control() {
     pthread_setname_np(pthread_self(), "control");
-    struct sched_param sp{}; sp.sched_priority = 70;
+    struct sched_param sp{}; sp.sched_priority = 45;
     if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) != 0) {
         RCLCPP_FATAL(this->get_logger(), "Failed to set realtime priority for control thread");
         rclcpp::shutdown();
         return;
     }
-    auto period = std::chrono::microseconds(static_cast<long long>(dt_ * 1000000));
+    const auto period = std::chrono::microseconds(static_cast<long long>(dt_ * 1000000));
+    auto next_release = std::chrono::steady_clock::now();
     while(rclcpp::ok()){
-        auto loop_start = std::chrono::steady_clock::now();
+        next_release += period;
         try {
             apply_action();
         } catch (const std::exception& e) {
@@ -281,34 +282,67 @@ void InferenceNode::control() {
             return;
         }
         auto loop_end = std::chrono::steady_clock::now();
-        auto elapsed_time = std::chrono::duration_cast<std::chrono::microseconds>(loop_end - loop_start);
-        auto sleep_time = period - elapsed_time;
-        if (sleep_time > std::chrono::microseconds(0)) {
-            std::this_thread::sleep_for(sleep_time);
+        if (loop_end > next_release) {
+            const auto missed_periods = (loop_end - next_release) / period;
+            next_release += period * missed_periods;
+            if (next_release < loop_end) {
+                next_release += period;
+            }
         }
+        std::this_thread::sleep_until(next_release);
     }
 }
 
 void InferenceNode::inference() {
     pthread_setname_np(pthread_self(), "inference");
-    struct sched_param sp{}; sp.sched_priority = 70;
+    const unsigned int total_cores = std::thread::hardware_concurrency();
+    const unsigned int cpu_id = total_cores > 1 ? total_cores / 2 : 0;
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpu_id, &cpuset);
+    if (pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset) != 0) {
+        RCLCPP_FATAL(this->get_logger(), "Failed to bind inference thread to Core %u", cpu_id);
+        rclcpp::shutdown();
+        return;
+    }
+    struct sched_param sp{}; sp.sched_priority = 35;
     if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) != 0) {
         RCLCPP_FATAL(this->get_logger(), "Failed to set realtime priority for inference thread");
         rclcpp::shutdown();
         return;
     }
-    auto period = std::chrono::microseconds(static_cast<long long>(dt_ * 1000 * 1000 * decimation_));
+    const auto period = std::chrono::microseconds(static_cast<long long>(dt_ * 1000 * 1000 * decimation_));
+    auto next_release = std::chrono::steady_clock::now();
 
     while(rclcpp::ok()){
+        next_release += period;
         auto loop_start = std::chrono::steady_clock::now();
         if(!is_running_.load()){
-            std::this_thread::sleep_for(period);
+            const auto now = std::chrono::steady_clock::now();
+            if (now > next_release) {
+                const auto missed_periods = (now - next_release) / period;
+                next_release += period * missed_periods;
+                if (next_release < now) {
+                    next_release += period;
+                }
+            }
+            std::this_thread::sleep_until(next_release);
             continue;
         }
 
         try {
             std::unique_lock<std::mutex> mode_lock(mode_mutex_);
             if (!is_running_.load()) {
+                mode_lock.unlock();
+                const auto now = std::chrono::steady_clock::now();
+                if (now > next_release) {
+                    const auto missed_periods = (now - next_release) / period;
+                    next_release += period * missed_periods;
+                    if (next_release < now) {
+                        next_release += period;
+                    }
+                }
+                std::this_thread::sleep_until(next_release);
                 continue;
             }
             auto& policy = active_policy();
@@ -364,16 +398,16 @@ void InferenceNode::inference() {
         }
 
         auto loop_end = std::chrono::steady_clock::now();
-        // 使用微秒进行计算
         auto elapsed_time = std::chrono::duration_cast<std::chrono::microseconds>(loop_end - loop_start);
-        auto sleep_time = period - elapsed_time;
-
-        if (sleep_time > std::chrono::microseconds(0)) {
-            std::this_thread::sleep_for(sleep_time);
-        } else {
-            // 警告信息也使用更精确的单位
+        if (loop_end > next_release) {
             RCLCPP_WARN(this->get_logger(), "Inference loop overran! Took %lld us, but period is %lld us.", static_cast<long long>(elapsed_time.count()), static_cast<long long>(period.count()));
+            const auto missed_periods = (loop_end - next_release) / period;
+            next_release += period * missed_periods;
+            if (next_release < loop_end) {
+                next_release += period;
+            }
         }
+        std::this_thread::sleep_until(next_release);
     }
 }
 
@@ -383,12 +417,6 @@ int main(int argc, char **argv) {
         RCLCPP_WARN(rclcpp::get_logger("main"), "mlockall failed.");
     }
     pthread_setname_np(pthread_self(), "main");
-    struct sched_param sp{}; sp.sched_priority = 50;
-    if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) != 0) {
-        RCLCPP_FATAL(rclcpp::get_logger("main"), "Failed to set realtime priority for main thread");
-        rclcpp::shutdown();
-        return 1;
-    }
     std::shared_ptr<InferenceNode> node;
     try {
         node = std::make_shared<InferenceNode>();
