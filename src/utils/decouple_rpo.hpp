@@ -12,11 +12,9 @@ struct LinkParamsRPO
 {
     double l_rod;
     double l_bar;
-    double l_spacing;
     Eigen::Vector3d r_A_0;
     Eigen::Vector3d r_B_0;
     Eigen::Vector3d r_C_0;
-    double theta_0;
 };
 
 struct IKResultRPO
@@ -34,11 +32,11 @@ public:
 
     DecoupleRPO();
 
-    void get_forwardQVT(Eigen::VectorXd &q, Eigen::VectorXd &vel,
-                        Eigen::VectorXd &tau, bool is_left) override;
+    void get_forwardQVT(Eigen::Vector2d &q, Eigen::Vector2d &vel,
+                        Eigen::Vector2d &tau, bool is_left) override;
 
-    void get_decoupleQVT(Eigen::VectorXd &q, Eigen::VectorXd &vel,
-                         Eigen::VectorXd &tau, bool is_left) override;
+    void get_decoupleQVT(Eigen::Vector2d &q, Eigen::Vector2d &vel,
+                         Eigen::Vector2d &tau, bool is_left) override;
 
 private:
     std::vector<LinkParamsRPO> links_left_;

@@ -3,6 +3,8 @@
 
 #include "robot_interface.hpp"
 
+#include <array>
+
 RobotInterface::RobotInterface(const std::string& config_file) {
     YAML::Node config = YAML::LoadFile(config_file);
 
@@ -107,7 +109,7 @@ void RobotInterface::setup_imu(){
 }
 
 void RobotInterface::forward_close_chain() {
-    Eigen::VectorXd q(2), vel(2), tau(2);
+    Eigen::Vector2d q, vel, tau;
     for (size_t pair = 0; pair < 2; ++pair) {
         const bool left = (pair == 0);
         int idx1 = close_chain_joint_idx_[pair * 2];
@@ -163,16 +165,18 @@ void RobotInterface::read_imu() {
     Eigen::Map<Eigen::Vector3f>(ang_vel_buf_.data()) = omega_body;
 }
 
-void RobotInterface::apply_action(std::vector<float> p,
-                                  std::vector<float> v,
-                                  std::vector<float> kp,
-                                  std::vector<float> kd,
-                                  std::vector<float> tau) {
+void RobotInterface::apply_action(const std::vector<float>& p,
+                                  const std::vector<float>& v,
+                                  const std::vector<float>& kp,
+                                  const std::vector<float>& kd,
+                                  const std::vector<float>& tau) {
     std::unique_lock<std::mutex> command_lock(command_mutex_);
     if(!is_init_.load()){
         return;
     }
     const bool use_close_chain_tau = !close_chain_joint_idx_.empty() && ankle_decouple_;
+    std::array<float, 4> ankle_motor_tau{};
+
     read_joints();
 
     {
@@ -193,19 +197,19 @@ void RobotInterface::apply_action(std::vector<float> p,
                 return tau.empty() ? 0.0 : static_cast<double>(tau[close_chain_joint_idx_[i]]);
             };
 
-            Eigen::VectorXd q(2), vel(2), tau_cc(2);
+            Eigen::Vector2d q, vel, tau_cc;
             for (size_t pair = 0; pair < 2; ++pair) {
                 const bool left = (pair == 0);
                 const size_t off = pair * 2;
-                int idx1 = close_chain_joint_idx_[off];
-                int idx2 = close_chain_joint_idx_[off + 1];
+                const int idx1 = close_chain_joint_idx_[off];
+                const int idx2 = close_chain_joint_idx_[off + 1];
                 q << joint_q_[idx1], joint_q_[idx2];
                 vel << joint_vel_[idx1], joint_vel_[idx2];
                 tau_cc << kp_cc(off)     * (p[idx1] - q[0]) + kd_cc(off)     * (vel_target_cc(off)     - vel[0]) + tau_ff_cc(off),
                           kp_cc(off + 1) * (p[idx2] - q[1]) + kd_cc(off + 1) * (vel_target_cc(off + 1) - vel[1]) + tau_ff_cc(off + 1);
                 ankle_decouple_->get_decoupleQVT(q, vel, tau_cc, left);
-                p[idx1] = static_cast<float>(tau_cc[0]);
-                p[idx2] = static_cast<float>(tau_cc[1]);
+                ankle_motor_tau[off] = static_cast<float>(tau_cc[0]);
+                ankle_motor_tau[off + 1] = static_cast<float>(tau_cc[1]);
             }
         }
     }
@@ -214,22 +218,20 @@ void RobotInterface::apply_action(std::vector<float> p,
         std::unique_lock<std::mutex> lock(motors_mutex_);
         for (size_t i = 0; i < motor_pos_target_.size(); i++){
             const size_t ji = motor2urdf_[i];
-            const bool close_chain_tau = use_close_chain_tau &&
-                std::find(robot_cfg_->close_chain_motor_idx_.begin(),
-                          robot_cfg_->close_chain_motor_idx_.end(),
-                          static_cast<long int>(i)) != robot_cfg_->close_chain_motor_idx_.end();
-            if (close_chain_tau) {
-                motor_pos_target_[i] = 0.0f;
-                motor_vel_target_[i] = 0.0f;
-                motor_kp_target_[i]  = 0.0f;
-                motor_kd_target_[i]  = 0.0f;
-                motor_tau_target_[i] = p[ji];
-            } else {
-                motor_pos_target_[i] = p[ji];
-                motor_vel_target_[i] = v.empty()  ? 0.0f : v[ji];
-                motor_kp_target_[i]  = kp.empty() ? static_cast<float>(robot_cfg_->kp_[i]) : kp[ji];
-                motor_kd_target_[i]  = kd.empty() ? static_cast<float>(robot_cfg_->kd_[i]) : kd[ji];
-                motor_tau_target_[i] = tau.empty() ? 0.0f : tau[ji];
+            motor_pos_target_[i] = p[ji];
+            motor_vel_target_[i] = v.empty() ? 0.0f : v[ji];
+            motor_kp_target_[i]  = kp.empty() ? static_cast<float>(robot_cfg_->kp_[i]) : kp[ji];
+            motor_kd_target_[i]  = kd.empty() ? static_cast<float>(robot_cfg_->kd_[i]) : kd[ji];
+            motor_tau_target_[i] = tau.empty() ? 0.0f : tau[ji];
+        }
+        if (use_close_chain_tau) {
+            for (size_t ankle_idx = 0; ankle_idx < ankle_motor_tau.size(); ++ankle_idx) {
+                const size_t motor_idx = robot_cfg_->close_chain_motor_idx_[ankle_idx];
+                motor_pos_target_[motor_idx] = 0.0f;
+                motor_vel_target_[motor_idx] = 0.0f;
+                motor_kp_target_[motor_idx] = 0.0f;
+                motor_kd_target_[motor_idx] = 0.0f;
+                motor_tau_target_[motor_idx] = ankle_motor_tau[ankle_idx];
             }
         }
     }
@@ -263,7 +265,7 @@ void RobotInterface::reset_joints(std::vector<double> joint_default_angle) {
         }
 
         if (!close_chain_joint_idx_.empty() && ankle_decouple_) {
-            Eigen::VectorXd q(2), vel(2), tau(2);
+            Eigen::Vector2d q, vel = Eigen::Vector2d::Zero(), tau = Eigen::Vector2d::Zero();
             for (size_t pair = 0; pair < 2; ++pair) {
                 const bool left = (pair == 0);
                 int idx1 = close_chain_joint_idx_[pair * 2];

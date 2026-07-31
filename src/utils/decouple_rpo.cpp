@@ -25,20 +25,16 @@ std::vector<LinkParamsRPO> DecoupleRPO::get_links(bool is_left)
     // long link
     links[0].l_rod = 180.0;
     links[0].l_bar = l_bar;
-    links[0].l_spacing = l_spacing;
     links[0].r_A_0 = Eigen::Vector3d(0, l_spacing, 180);
     links[0].r_B_0 = Eigen::Vector3d(r_B1_0_x, l_spacing, r_B1_0_z);
     links[0].r_C_0 = Eigen::Vector3d(-20, l_spacing, 0);
-    links[0].theta_0 = long_link_angle_0;
 
     // short link
     links[1].l_rod = 110.0;
     links[1].l_bar = l_bar;
-    links[1].l_spacing = l_spacing;
     links[1].r_A_0 = Eigen::Vector3d(0, l_spacing, 110);
     links[1].r_B_0 = Eigen::Vector3d(r_B2_0_x, l_spacing, r_B2_0_z);
     links[1].r_C_0 = Eigen::Vector3d(20, l_spacing, 0);
-    links[1].theta_0 = short_link_angle_0;
 
     return links;
 }
@@ -184,7 +180,6 @@ DecoupleRPO::forward_kinematics(const Eigen::Vector2d &thetaRef, bool is_left)
         {
             std::cerr << "DecoupleRPO::forward_kinematics() Jac is nan!!" << std::endl;
             std::cerr << "  pitch=" << x_k[0] << ", roll=" << x_k[1] << std::endl;
-            mapping_result.count = -1;
             mapping_result.ankle_joint_ori = Eigen::Vector2d::Zero();
             mapping_result.Jac = Jac;
             return mapping_result;
@@ -200,7 +195,6 @@ DecoupleRPO::forward_kinematics(const Eigen::Vector2d &thetaRef, bool is_left)
         last_solution_[is_left] = x_k;
     }
 
-    mapping_result.count = count;
     mapping_result.ankle_joint_ori = x_k;
     mapping_result.Jac = Jac;
 
@@ -209,7 +203,7 @@ DecoupleRPO::forward_kinematics(const Eigen::Vector2d &thetaRef, bool is_left)
 //////********************forward kinematics*****************//////
 
 // from joint [pitch, roll] to motor [theta], from Serial to Parallel
-void DecoupleRPO::get_decoupleQVT(Eigen::VectorXd &q, Eigen::VectorXd &vel, Eigen::VectorXd &tau, bool is_left)
+void DecoupleRPO::get_decoupleQVT(Eigen::Vector2d &q, Eigen::Vector2d &vel, Eigen::Vector2d &tau, bool is_left)
 {
     double pitch = q[0];
     double roll = q[1];
@@ -220,7 +214,7 @@ void DecoupleRPO::get_decoupleQVT(Eigen::VectorXd &q, Eigen::VectorXd &vel, Eige
     tau = motor.second.J_motor2Joint.transpose() * tau;
 }
 
-void DecoupleRPO::get_forwardQVT(Eigen::VectorXd &q, Eigen::VectorXd &vel, Eigen::VectorXd &tau, bool is_left)
+void DecoupleRPO::get_forwardQVT(Eigen::Vector2d &q, Eigen::Vector2d &vel, Eigen::Vector2d &tau, bool is_left)
 {
     ForwardMappingResult joint = forward_kinematics(q, is_left);
     q = joint.ankle_joint_ori;

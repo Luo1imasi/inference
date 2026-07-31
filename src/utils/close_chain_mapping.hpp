@@ -15,7 +15,6 @@ struct JacobianResult
 
 struct ForwardMappingResult
 {
-    int count;
     Eigen::Vector2d ankle_joint_ori;
     JacobianResult Jac;
 };
@@ -26,11 +25,11 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     virtual ~Decouple() = default;
 
-    virtual void get_forwardQVT(Eigen::VectorXd &q, Eigen::VectorXd &vel,
-                                Eigen::VectorXd &tau, bool is_left) = 0;
+    virtual void get_forwardQVT(Eigen::Vector2d &q, Eigen::Vector2d &vel,
+                                Eigen::Vector2d &tau, bool is_left) = 0;
 
-    virtual void get_decoupleQVT(Eigen::VectorXd &q, Eigen::VectorXd &vel,
-                                 Eigen::VectorXd &tau, bool is_left) = 0;
+    virtual void get_decoupleQVT(Eigen::Vector2d &q, Eigen::Vector2d &vel,
+                                 Eigen::Vector2d &tau, bool is_left) = 0;
 
     static std::shared_ptr<Decouple> create(const std::string &type);
 };

@@ -47,11 +47,11 @@ class RobotInterface {
         std::vector<double> kp_, kd_, extrinsic_R_;
     };
 
-    void apply_action(std::vector<float> p,
-                      std::vector<float> v  = {},
-                      std::vector<float> kp = {},
-                      std::vector<float> kd = {},
-                      std::vector<float> tau = {});
+    void apply_action(const std::vector<float>& p,
+                      const std::vector<float>& v = {},
+                      const std::vector<float>& kp = {},
+                      const std::vector<float>& kd = {},
+                      const std::vector<float>& tau = {});
     void init_motors();
     void deinit_motors();
     void reset_joints(std::vector<double> joint_default_angle);
