@@ -189,10 +189,6 @@ InferenceNode::PolicyRuntime& InferenceNode::active_policy() {
     return policies_[active_policy_idx_];
 }
 
-const InferenceNode::PolicyRuntime& InferenceNode::active_policy() const {
-    return policies_[active_policy_idx_];
-}
-
 void InferenceNode::initialize_runtime_state() {
     active_policy_idx_ = 0;
 
@@ -376,21 +372,24 @@ void InferenceNode::inference() {
                 policy.ctx->output_names_raw.data(), policy.ctx->output_tensor.get(), policy.ctx->num_outputs);
 
             {
+                std::unique_lock<std::mutex> interrupt_lock(interrupt_mutex_, std::defer_lock);
+                if (supports_interrupt() && is_interrupt_.load()) {
+                    interrupt_lock.lock();
+                }
                 std::unique_lock<std::mutex> lock(act_mutex_);
-                for (int i = 0; i < policy.ctx->output_buffer.size(); i++) {
+                for (int i = 0; i < static_cast<int>(policy.ctx->output_buffer.size()); i++) {
                     policy.ctx->output_buffer[i] = std::clamp(policy.ctx->output_buffer[i], -clip_actions_, clip_actions_);
                     const auto joint_idx = usd2urdf_[i];
                     act_[joint_idx] = policy.ctx->output_buffer[i] * action_scale_[joint_idx] +
                                       joint_default_angle_[joint_idx];
                 }
-                if(supports_interrupt() && is_interrupt_.load()){
-                    std::unique_lock<std::mutex> lock(interrupt_mutex_);
+                if (interrupt_lock.owns_lock()) {
                     for (size_t i = 0; i < interrupt_action_.size(); i++) {
                         act_[act_.size() - interrupt_action_.size() + i] = interrupt_action_[i];
                     }
                 }
-                publish_action();
             }
+            publish_action();
         } catch (const std::exception& e) {
             RCLCPP_FATAL(this->get_logger(), "Exception in inference thread: %s", e.what());
             rclcpp::shutdown();

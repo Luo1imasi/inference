@@ -573,8 +573,11 @@ void InferenceNode::publish_joint_states() {
 
 void InferenceNode::publish_action() {
     action_msg_.header.stamp = this->now();
-    for (int i = 0; i < joint_num_; i++) {
-        action_msg_.position[i] = act_[i];
+    {
+        std::unique_lock<std::mutex> lock(act_mutex_);
+        for (int i = 0; i < joint_num_; i++) {
+            action_msg_.position[i] = act_[i];
+        }
     }
     action_publisher_->publish(action_msg_);
 }

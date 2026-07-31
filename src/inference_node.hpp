@@ -246,7 +246,6 @@ class InferenceNode : public rclcpp::Node {
     void control();
     void apply_action();
     PolicyRuntime& active_policy();
-    const PolicyRuntime& active_policy() const;
 
     void load_config();
     void setup_model(std::unique_ptr<ModelContext>& ctx, std::string model_path, int input_size);
