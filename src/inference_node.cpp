@@ -116,6 +116,8 @@ void InferenceNode::setup_model(std::unique_ptr<ModelContext>& ctx, std::string 
         ctx->output_names[i] = output_name.get();
         auto type_info = ctx->session->GetOutputTypeInfo(i);
         ctx->output_shape = type_info.GetTensorTypeAndShapeInfo().GetShape();
+        if (ctx->output_shape[0] == -1) ctx->output_shape[0] = 1;
+        if (ctx->output_shape[1] == -1) ctx->output_shape[1] = joint_num_;
     }
 
     ctx->input_names_raw = std::vector<const char *>(ctx->num_inputs, nullptr);
@@ -241,6 +243,9 @@ void InferenceNode::reset_policy_runtime(PolicyRuntime& policy) {
         std::fill(policy.ctx->output_buffer.begin(), policy.ctx->output_buffer.end(), 0.0f);
     }
     policy.motion_frame = 0;
+    if (policy.latent_loader) {
+        policy.latent_loader->reset();
+    }
     policy.is_first_frame = true;
 }
 
@@ -353,8 +358,15 @@ void InferenceNode::inference() {
             });
 
             if (!policy.history_gather_plan.empty()) {
-                update_obs_history(policy.obs_history, policy.obs, policy.obs_num,
-                                   policy.frame_stack, policy.is_first_frame);
+                if (policy.is_first_frame && policy.latent_loader) {
+                    std::fill(policy.obs_history.begin(),
+                              policy.obs_history.end() - policy.obs_num, 0.0f);
+                    std::copy(policy.obs.begin(), policy.obs.end(),
+                              policy.obs_history.end() - policy.obs_num);
+                } else {
+                    update_obs_history(policy.obs_history, policy.obs, policy.obs_num,
+                                       policy.frame_stack, policy.is_first_frame);
+                }
                 gather_sparse_obs_history(policy.ctx->input_buffer, policy.obs_history,
                                           policy.history_gather_plan);
             } else {
@@ -378,7 +390,8 @@ void InferenceNode::inference() {
                 }
                 std::unique_lock<std::mutex> lock(act_mutex_);
                 for (int i = 0; i < static_cast<int>(policy.ctx->output_buffer.size()); i++) {
-                    policy.ctx->output_buffer[i] = std::clamp(policy.ctx->output_buffer[i], -clip_actions_, clip_actions_);
+                    policy.ctx->output_buffer[i] = action_rescale_ * std::clamp(
+                        policy.ctx->output_buffer[i], -clip_actions_, clip_actions_);
                     const auto joint_idx = usd2urdf_[i];
                     act_[joint_idx] = policy.ctx->output_buffer[i] * action_scale_[joint_idx] +
                                       joint_default_angle_[joint_idx];

@@ -48,6 +48,7 @@ def launch_setup(context, *args, **kwargs):
                     "robot_config": robot_config,
                     "model_dir": os.path.join(robot_dir, "models"),
                     "motion_dir": os.path.join(robot_dir, "motions"),
+                    "latent_dir": os.path.join(robot_dir, "latents"),
                 },
             ],
             output="screen",

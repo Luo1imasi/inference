@@ -28,6 +28,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp> 
 #include "utils/motion_loader.hpp"
+#include "utils/latent_loader.hpp"
 #include <std_srvs/srv/trigger.hpp>
 #include "robot_interface.hpp"
 
@@ -93,6 +94,7 @@ class InferenceNode : public rclcpp::Node {
         ObsStackOrder stack_order = ObsStackOrder::FrameMajor;
         std::unique_ptr<ModelContext> ctx;
         std::shared_ptr<MotionLoader> motion_loader;
+        std::unique_ptr<LatentLoader> latent_loader;
         size_t motion_frame = 0;
         bool is_first_frame = true;
     };
@@ -233,6 +235,7 @@ class InferenceNode : public rclcpp::Node {
     float obs_scales_lin_vel_, obs_scales_ang_vel_, obs_scales_dof_pos_, obs_scales_dof_vel_,
         obs_scales_gravity_b_, clip_observations_;
     float clip_actions_;
+    float action_rescale_ = 1.0f;
     std::vector<double> action_scale_, clip_cmd_, joint_default_angle_, joint_limits_;
     std::vector<long int> usd2urdf_;
     float gravity_z_upper_;
@@ -298,6 +301,7 @@ class InferenceNode : public rclcpp::Node {
     void get_perception_obs(std::vector<float>& segment);
     void get_motion_pos_obs(std::vector<float>& segment);
     void get_motion_vel_obs(std::vector<float>& segment);
+    void get_latent_obs(std::vector<float>& segment);
 
     void init_motors_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                          std::shared_ptr<std_srvs::srv::Trigger::Response> response);

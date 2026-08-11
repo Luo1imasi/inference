@@ -12,8 +12,10 @@ void InferenceNode::load_config() {
     this->declare_parameter<std::string>("robot_config", default_robot_dir + "/robot.yaml");
     this->declare_parameter<std::string>("model_dir", default_robot_dir + "/models");
     this->declare_parameter<std::string>("motion_dir", default_robot_dir + "/motions");
+    this->declare_parameter<std::string>("latent_dir", default_robot_dir + "/latents");
     this->declare_parameter<std::vector<std::string>>("model_names", std::vector<std::string>{});
     this->declare_parameter<std::vector<std::string>>("motion_names", std::vector<std::string>{});
+    this->declare_parameter<std::vector<std::string>>("latent_names", std::vector<std::string>{});
     this->declare_parameter<std::vector<std::string>>("obs_layouts", std::vector<std::string>{});
     this->declare_parameter<std::vector<long int>>("frame_stacks", std::vector<long int>{});
     this->declare_parameter<std::vector<std::string>>("obs_stack_orders", std::vector<std::string>{});
@@ -32,14 +34,18 @@ void InferenceNode::load_config() {
     this->declare_parameter<float>("clip_observations", 100.0);
     this->declare_parameter<std::vector<double>>("action_scale", std::vector<double>{0.3});
     this->declare_parameter<float>("clip_actions", 18.0);
+    this->declare_parameter<double>("action_rescale", 1.0);
     this->declare_parameter<std::vector<long int>>("usd2urdf", std::vector<long int>{});
     this->declare_parameter<std::vector<double>>(
         "clip_cmd", std::vector<double>{-0.4, 0.6, -0.4, 0.4, -0.8, 0.8});
     this->declare_parameter<std::vector<double>>("joint_default_angle", std::vector<double>{});
     this->declare_parameter<std::vector<double>>("joint_limits", std::vector<double>{});
     this->declare_parameter<float>("gravity_z_upper", -0.5);
+    this->declare_parameter<double>("gamma", 0.8);
+    this->declare_parameter<int>("window_size", 1);
     std::vector<std::string> model_names;
     std::vector<std::string> motion_names;
+    std::vector<std::string> latent_names;
     std::vector<std::string> obs_layouts;
     std::vector<long int> frame_stacks;
     std::vector<std::string> obs_stack_orders;
@@ -47,13 +53,16 @@ void InferenceNode::load_config() {
     std::string policy_name;
     std::string model_dir;
     std::string motion_dir;
+    std::string latent_dir;
     this->get_parameter("robot_name", robot_name);
     this->get_parameter("policy_name", policy_name);
     this->get_parameter("robot_config", robot_config_path_);
     this->get_parameter("model_dir", model_dir);
     this->get_parameter("motion_dir", motion_dir);
+    this->get_parameter("latent_dir", latent_dir);
     this->get_parameter("model_names", model_names);
     this->get_parameter("motion_names", motion_names);
+    this->get_parameter("latent_names", latent_names);
     this->get_parameter("obs_layouts", obs_layouts);
     this->get_parameter("frame_stacks", frame_stacks);
     this->get_parameter("obs_stack_orders", obs_stack_orders);
@@ -71,6 +80,9 @@ void InferenceNode::load_config() {
     this->get_parameter("obs_scales_gravity_b", obs_scales_gravity_b_);
     this->get_parameter("clip_observations", clip_observations_);
     this->get_parameter("action_scale", action_scale_);
+    double action_rescale = 1.0;
+    this->get_parameter("action_rescale", action_rescale);
+    action_rescale_ = static_cast<float>(action_rescale);
     if (joint_num_ <= 0) {
         throw std::runtime_error("joint_num must be greater than zero");
     }
@@ -88,6 +100,10 @@ void InferenceNode::load_config() {
     this->get_parameter("joint_default_angle", joint_default_angle_);
     this->get_parameter("joint_limits", joint_limits_);
     this->get_parameter("gravity_z_upper", gravity_z_upper_);
+    double latent_gamma = 0.8;
+    this->get_parameter("gamma", latent_gamma);
+    int latent_window_size = 1;
+    this->get_parameter("window_size", latent_window_size);
 
     policies_.clear();
     motion_policy_indices_.clear();
@@ -110,6 +126,7 @@ void InferenceNode::load_config() {
     require_policy_count(frame_stacks, "frame_stacks");
     require_policy_count(obs_stack_orders, "obs_stack_orders");
     require_empty_or_policy_count(motion_names, "motion_names");
+    require_empty_or_policy_count(latent_names, "latent_names");
 
     const auto resolve_asset_path = [](const std::string& base_dir, const std::string& asset_name) {
         const std::filesystem::path asset_path(asset_name);
@@ -122,6 +139,7 @@ void InferenceNode::load_config() {
     for (size_t i = 0; i < policy_count; i++) {
         const std::string& policy_model_name = model_names[i];
         const std::string policy_motion_name = motion_names.empty() ? "" : motion_names[i];
+        const std::string policy_latent_name = latent_names.empty() ? "" : latent_names[i];
         const long int policy_frame_stack = frame_stacks[i];
         if (policy_model_name.empty()) {
             throw std::runtime_error("model_names[" + std::to_string(i) + "] must not be empty");
@@ -138,6 +156,11 @@ void InferenceNode::load_config() {
         policy.stack_order = parse_obs_stack_order(obs_stack_orders[i]);
         if (!policy_motion_name.empty()) {
             policy.motion_path = resolve_asset_path(motion_dir, policy_motion_name);
+        }
+        if (!policy_latent_name.empty()) {
+            policy.latent_loader = std::make_unique<LatentLoader>(
+                resolve_asset_path(latent_dir, policy_latent_name),
+                static_cast<float>(latent_gamma), latent_window_size);
         }
         policy.obs_layout = parse_obs_layout(obs_layouts[i], "obs_layouts[" + std::to_string(i) + "]");
         policy.obs_layout_sizes.reserve(policy.obs_layout.size());
@@ -239,6 +262,7 @@ void InferenceNode::load_config() {
     RCLCPP_INFO(this->get_logger(), "robot_config: %s", robot_config_path_.c_str());
     RCLCPP_INFO(this->get_logger(), "model_dir: %s", model_dir.c_str());
     RCLCPP_INFO(this->get_logger(), "motion_dir: %s", motion_dir.c_str());
+    RCLCPP_INFO(this->get_logger(), "latent_dir: %s", latent_dir.c_str());
     for(size_t i = 0; i < policies_.size(); i++) {
         RCLCPP_INFO(this->get_logger(), "policy %zu: %s", i, policies_[i].name.c_str());
         RCLCPP_INFO(this->get_logger(), "policy_model_path %zu: %s", i, policies_[i].model_path.c_str());

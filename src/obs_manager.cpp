@@ -85,6 +85,7 @@ const std::vector<ObsSourceDefinition>& InferenceNode::obs_source_definitions() 
         {"last_action", &InferenceNode::get_last_action_obs},
         {"interrupt", &InferenceNode::get_interrupt_obs},
         {"perception", &InferenceNode::get_perception_obs},
+        {"latent", &InferenceNode::get_latent_obs},
     };
     return definitions;
 }
@@ -146,7 +147,16 @@ bool InferenceNode::has_obs_source(const std::string& source_name) const {
 
 void InferenceNode::update_obs_segments(std::vector<std::vector<float>>& segments, const std::vector<ObsSourceSpec>& layout) {
     for (size_t i = 0; i < layout.size(); i++) {
-        (this->*(layout[i].source->get))(segments[i]);
+        size_t previous = 0;
+        while (previous < i && (layout[previous].source != layout[i].source ||
+                                layout[previous].size != layout[i].size)) {
+            ++previous;
+        }
+        if (previous < i) {
+            segments[i] = segments[previous];
+        } else {
+            (this->*(layout[i].source->get))(segments[i]);
+        }
     }
 }
 
@@ -247,4 +257,12 @@ void InferenceNode::get_interrupt_obs(std::vector<float>& segment) {
 void InferenceNode::get_perception_obs(std::vector<float>& segment) {
     std::unique_lock<std::mutex> lock(perception_mutex_);
     std::copy(perception_obs_buffer_.begin(), perception_obs_buffer_.begin() + segment.size(), segment.begin());
+}
+
+void InferenceNode::get_latent_obs(std::vector<float>& segment) {
+    auto& policy = active_policy();
+    if (!policy.latent_loader) {
+        throw std::runtime_error("latent observation requires latent_names");
+    }
+    policy.latent_loader->next(segment);
 }
