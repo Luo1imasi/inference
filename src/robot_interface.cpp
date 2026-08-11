@@ -240,6 +240,10 @@ void RobotInterface::apply_action(const std::vector<float>& p,
 }
 
 void RobotInterface::reset_joints(std::vector<double> joint_default_angle) {
+    std::unique_lock<std::mutex> reset_lock(reset_mutex_, std::try_to_lock);
+    if (!reset_lock.owns_lock()) {
+        throw std::runtime_error("Joint reset is already in progress");
+    }
     std::unique_lock<std::mutex> command_lock(command_mutex_);
 
     constexpr int reset_duration_ms = 4000;
@@ -344,18 +348,19 @@ void RobotInterface::init_motors() {
 }
 
 void RobotInterface::deinit_motors() {
-    std::unique_lock<std::mutex> command_lock(command_mutex_);
-    if (!is_init_.load()) {
+    if (!is_init_.exchange(false)) {
         throw std::runtime_error("Motors are already deinitialized");
     }
     exec_motors_parallel([](std::shared_ptr<MotorDriver>& motor, int) {
         motor->deinit_motor();
     });
-    is_init_.store(false);
 }
 
 void RobotInterface::motors_mit_cmd() {
     std::unique_lock<std::mutex> lock(motors_mutex_);
+    if (!is_init_.load()) {
+        return;
+    }
     thread_pool_->run_parallel(motor_bus_offsets_.size() - 1, [this](size_t bus) {
         const size_t start_count = motor_bus_offsets_[bus];
         const size_t end_count = motor_bus_offsets_[bus + 1];

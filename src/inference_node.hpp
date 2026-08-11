@@ -20,6 +20,7 @@
 #include <iostream>
 #include <queue>
 #include <sstream>
+#include <thread>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
@@ -184,6 +185,10 @@ class InferenceNode : public rclcpp::Node {
             "stop_inference", std::bind(&InferenceNode::stop_inference_srv, this, std::placeholders::_1, std::placeholders::_2));
     }
     ~InferenceNode() {
+        is_running_.store(false);
+        if (reset_thread_.joinable()) {
+            reset_thread_.join();
+        }
         if (inference_thread_.joinable()) {
             inference_thread_.join();
         }
@@ -191,7 +196,7 @@ class InferenceNode : public rclcpp::Node {
             control_thread_.join();
         }
         reset_runtime_state();
-        if(robot_){
+        if (robot_) {
             robot_.reset();
         }
     }
@@ -220,6 +225,9 @@ class InferenceNode : public rclcpp::Node {
     rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr clear_depth_history_client_;
     std::thread inference_thread_;
     std::thread control_thread_;
+    std::thread reset_thread_;
+    std::mutex reset_thread_mutex_;
+    bool reset_thread_running_ = false;
     float act_alpha_;
     float dt_;
     float obs_scales_lin_vel_, obs_scales_ang_vel_, obs_scales_dof_pos_, obs_scales_dof_vel_,
@@ -245,6 +253,7 @@ class InferenceNode : public rclcpp::Node {
     void inference();
     void control();
     void apply_action();
+    bool start_joint_reset();
     PolicyRuntime& active_policy();
 
     void load_config();

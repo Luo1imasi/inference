@@ -113,7 +113,7 @@ class RobotInterface {
     std::unique_ptr<ThreadPool> thread_pool_;
     std::vector<size_t> motor_bus_offsets_;
 
-    std::mutex command_mutex_, motors_mutex_, joint_mutex_, imu_mutex_;
+    std::mutex reset_mutex_, command_mutex_, motors_mutex_, joint_mutex_, imu_mutex_;
     std::vector<float> joint_q_, joint_vel_, joint_tau_;
     std::vector<float> motor_pos_target_, motor_vel_target_, motor_kp_target_, motor_kd_target_, motor_tau_target_;
     std::vector<int> close_chain_joint_idx_, motor2urdf_;

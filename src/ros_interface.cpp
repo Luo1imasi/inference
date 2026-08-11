@@ -306,10 +306,11 @@ void InferenceNode::subs_joy_callback(const std::shared_ptr<sensor_msgs::msg::Jo
             RCLCPP_INFO(this->get_logger(), "Inference paused");
         }
         try {
-            robot_->reset_joints(joint_default_angle_);
-            RCLCPP_INFO(this->get_logger(), "Motors reset");
+            if (!start_joint_reset()) {
+                RCLCPP_WARN(this->get_logger(), "Motor reset is already in progress");
+            }
         } catch (const std::exception& e) {
-            RCLCPP_WARN(this->get_logger(), "Failed to reset motors: %s", e.what());
+            RCLCPP_WARN(this->get_logger(), "Failed to start motor reset: %s", e.what());
         }
     }
     if (msg->buttons[1] == 1 && msg->buttons[1] != last_button2_) {
@@ -417,6 +418,50 @@ void InferenceNode::subs_joint_state_callback(const std::shared_ptr<sensor_msgs:
     }
 }
 
+bool InferenceNode::start_joint_reset() {
+    std::unique_lock<std::mutex> lock(reset_thread_mutex_);
+    if (reset_thread_running_) {
+        return false;
+    }
+    if (!robot_->is_init_.load()) {
+        throw std::runtime_error("Motors are not initialized");
+    }
+    if (reset_thread_.joinable()) {
+        reset_thread_.join();
+    }
+
+    reset_thread_running_ = true;
+    try {
+        reset_thread_ = std::thread([
+            this, robot = robot_, joint_default_angle = joint_default_angle_, logger = this->get_logger()
+        ]() {
+            try {
+                robot->reset_joints(joint_default_angle);
+                if (robot->is_init_.load()) {
+                    RCLCPP_INFO(logger, "Motors reset");
+                } else {
+                    RCLCPP_INFO(logger, "Motor reset interrupted by deinitialization");
+                }
+            } catch (const std::exception& e) {
+                if (robot->is_init_.load()) {
+                    RCLCPP_WARN(logger, "Failed to reset motors: %s", e.what());
+                } else {
+                    RCLCPP_INFO(logger, "Motor reset interrupted by deinitialization");
+                }
+            } catch (...) {
+                RCLCPP_ERROR(logger, "Motor reset failed with an unknown exception");
+            }
+
+            std::lock_guard<std::mutex> state_lock(reset_thread_mutex_);
+            reset_thread_running_ = false;
+        });
+    } catch (...) {
+        reset_thread_running_ = false;
+        throw;
+    }
+    return true;
+}
+
 void InferenceNode::reset_joints_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                                      std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
     try {
@@ -424,9 +469,13 @@ void InferenceNode::reset_joints_srv(const std::shared_ptr<std_srvs::srv::Trigge
             reset_runtime_state();
             RCLCPP_INFO(this->get_logger(), "Inference paused");
         }
-        robot_->reset_joints(joint_default_angle_);
+        if (!start_joint_reset()) {
+            response->success = false;
+            response->message = "Joint reset is already in progress";
+            return;
+        }
         response->success = true;
-        response->message = "Joints reset successfully";
+        response->message = "Joint reset started";
     } catch (const std::exception& e) {
         response->success = false;
         response->message = e.what();
