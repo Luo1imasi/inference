@@ -75,8 +75,7 @@ std::vector<int> parse_history_taps(const std::string& taps_spec,
 
 const std::vector<ObsSourceDefinition>& InferenceNode::obs_source_definitions() {
     static const std::vector<ObsSourceDefinition> definitions{
-        {"motion_pos", &InferenceNode::get_motion_pos_obs},
-        {"motion_vel", &InferenceNode::get_motion_vel_obs},
+        {"motion_command", &InferenceNode::get_motion_command_obs},
         {"ang_vel", &InferenceNode::get_ang_vel_obs},
         {"gravity_b", &InferenceNode::get_gravity_b_obs},
         {"cmd_vel", &InferenceNode::get_cmd_vel_obs},
@@ -180,16 +179,12 @@ void InferenceNode::step_motion_frame() {
     }
 }
 
-void InferenceNode::get_motion_pos_obs(std::vector<float>& segment) {
+void InferenceNode::get_motion_command_obs(std::vector<float>& segment) {
     auto& policy = active_policy();
-    const std::vector<float>& motion_pos = policy.motion_loader->get_pos(policy.motion_frame);
+    const auto& motion_pos = policy.motion_loader->get_pos(policy.motion_frame);
+    const auto& motion_vel = policy.motion_loader->get_vel(policy.motion_frame);
     std::copy(motion_pos.begin(), motion_pos.end(), segment.begin());
-}
-
-void InferenceNode::get_motion_vel_obs(std::vector<float>& segment) {
-    auto& policy = active_policy();
-    const std::vector<float>& motion_vel = policy.motion_loader->get_vel(policy.motion_frame);
-    std::copy(motion_vel.begin(), motion_vel.end(), segment.begin());
+    std::copy(motion_vel.begin(), motion_vel.end(), segment.begin() + motion_pos.size());
 }
 
 void InferenceNode::get_ang_vel_obs(std::vector<float>& segment) {

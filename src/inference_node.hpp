@@ -299,8 +299,7 @@ class InferenceNode : public rclcpp::Node {
     void get_last_action_obs(std::vector<float>& segment);
     void get_interrupt_obs(std::vector<float>& segment);
     void get_perception_obs(std::vector<float>& segment);
-    void get_motion_pos_obs(std::vector<float>& segment);
-    void get_motion_vel_obs(std::vector<float>& segment);
+    void get_motion_command_obs(std::vector<float>& segment);
     void get_latent_obs(std::vector<float>& segment);
 
     void init_motors_srv(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
